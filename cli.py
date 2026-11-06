@@ -21,10 +21,10 @@ def setup_argparse(parser: argparse.ArgumentParser) -> None:
     subs.add_parser("list", help="List recorded cassettes")
 
     show = subs.add_parser("show", help="Summarise a cassette")
-    show.add_argument("cassette", help="Cassette id (or a unique prefix) or a path")
+    show.add_argument("cassette", help="Cassette id, a unique prefix, a path, or `latest`")
 
     play = subs.add_parser("play", help="Replay a cassette offline and report every difference")
-    play.add_argument("cassette", help="Cassette id (or a unique prefix) or a path")
+    play.add_argument("cassette", help="Cassette id, a unique prefix, a path, or `latest`")
     play.add_argument("--hermes-python", default=sys.executable,
                       help="Python interpreter of the Hermes install to replay against (default: this one)")
     play.add_argument("--keep", action="store_true", help="Keep the scratch Hermes home for inspection")
@@ -35,6 +35,11 @@ def setup_argparse(parser: argparse.ArgumentParser) -> None:
 
 
 def resolve(ref: str) -> Path:
+    if ref.lower() in ("latest", "last"):
+        newest = next(iter(cas.iter_dir(runtime.cassette_dir())), None)  # newest first
+        if newest is None:
+            raise SystemExit("ariadne: no cassettes yet (turn recording on with `hermes ariadne record on`)")
+        return newest
     p = Path(ref).expanduser()
     if p.is_file():
         return p
