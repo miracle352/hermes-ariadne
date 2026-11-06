@@ -1,6 +1,6 @@
 # 001: a cut-off reply never fires `post_api_request`
 
-Found by Ariadne's hook-contract check on Nov 6, 2026. Happens on Hermes v0.23.0 and on `main`
+Found by Ariadne's hook-contract check on Nov 6, 2026. Filed as NousResearch/hermes-agent#150324. Happens on Hermes v0.23.0 and on `main`
 (6b21d056). Fix: `fix.patch`, also on branch `fix/length-stopped-post-api-request` of
 miracle352/hermes-agent.
 
