@@ -1,61 +1,60 @@
-# 001 — A length-stopped model reply never fires `post_api_request`
+# 001: a cut-off reply never fires `post_api_request`
 
-**Status:** found by Ariadne on 2026-11-06 · reproduces on Hermes v0.23.0 and on `main` @ `6b21d056` · fix attached (`fix.patch`) · not yet filed upstream
+Found by Ariadne's hook-contract check on Nov 6, 2026. Happens on Hermes v0.23.0 and on `main`
+(6b21d056). Fix: `fix.patch`, also on branch `fix/length-stopped-post-api-request` of
+miracle352/hermes-agent.
 
 ## What happens
-When a model reply stops because it hit its output limit (`finish_reason: "length"`), Hermes runs
-truncation recovery and asks the model to continue. The cut-off attempt is a real, completed (and
-billed) provider call, but Hermes never fires `post_api_request` or `api_request_error` for it:
+
+When a reply stops on `finish_reason: "length"`, Hermes asks the model to continue. The cut-off
+call never gets a `post_api_request` or `api_request_error`. Only the continuation does:
 
 ```
-pre_api_request   …:api:1                 ← cut-off reply (finish_reason=length)
-pre_api_request   …:api:2                 ← continuation
-post_api_request  …:api:2  finish=stop
+pre_api_request   ...:api:1               cut-off reply
+pre_api_request   ...:api:2               continuation
+post_api_request  ...:api:2  finish=stop
 ```
 
-`developer-guide/observer-hooks.md` describes `post_api_request` as firing "after a successful provider
-response". Every observer that opens a span or a timer on `pre_api_request` (Langfuse, OpenTelemetry-
-style collectors, cost and latency plugins) is left with a call that never ends, and never sees the
-truncated attempt's usage.
+The docs describe `post_api_request` as firing after a successful provider response. A plugin that
+starts a span or a timer on `pre_api_request` (tracing, latency, cost) never sees that call end.
 
 ## Why
-`agent/turn_response_check.py::check_api_response` handles `finish_reason == "length"` by calling
-`recover_from_truncation(...)` and returning (`continue` / `break` / `return`) **before**
-`normalize_model_response` (`agent/turn_response_intake.py`), which is the only place
-`post_api_request` fires.
 
-## Related, already reported (not this finding)
-The same early exit also skips `record_response_usage`, so the cut-off attempt's tokens never reach
-session usage, `/usage` or `state.db`: that part is **#126413** / **#125492**, with open fix PRs
-**#126414**, **#125505**, **#128746**. None of those PRs fire `post_api_request`, so the hook gap
-remains after they merge. Ariadne reproduces the usage part too:
+`check_api_response` in `agent/turn_response_check.py` sends a `length` reply to
+`recover_from_truncation`, which returns `break` and arms a restart. The loop restarts before
+`normalize_model_response` runs, and that is the only place `post_api_request` fires.
 
-| turn | provider calls made | Hermes records |
+## Already reported, but a different part
+
+The same early return skips usage accounting, so the cut-off call's tokens never reach
+`/usage` or `state.db`. That is #126413 and #125492, with open PRs #126414, #125505 and #128746.
+None of them fire the hook, so this stays broken after they merge. Ariadne sees that part too:
+
+| turn | calls billed | Hermes records |
 |---|---|---|
-| normal 2-call turn (control) | 2 | 2 calls · 20 in / 10 out tokens |
-| first reply cut off (`length`) | 2 | **1 call · 10 in / 5 out tokens** |
+| normal two-call turn | 2 | 2 calls, 20 in / 10 out |
+| first reply cut off | 2 | 1 call, 10 in / 5 out |
 
-## Reproduce (offline, $0)
+## Reproduce
+
 ```bash
-# with Ariadne installed in an editable Hermes checkout's venv
 python tests/scenarios/run.py <hermes-python> truncated_length
 ```
-The contract checker reports:
+
+The contract check prints
 `api_pairs: every pre_api_request ends with post_api_request or api_request_error`.
 
 ## Fix
-`fix.patch` fires `post_api_request` for the length-stopped attempt (best-effort, inside the same
-try/except contract as every observer) before truncation recovery runs. With the patch:
+
+Fire `post_api_request` for the cut-off call before truncation recovery runs. With the fix:
 
 ```
-pre_api_request   …:api:1
-post_api_request  …:api:1  finish=length
-pre_api_request   …:api:2
-post_api_request  …:api:2  finish=stop
+pre_api_request   ...:api:1
+post_api_request  ...:api:1  finish=length
+pre_api_request   ...:api:2
+post_api_request  ...:api:2  finish=stop
 ```
 
-Hermes's own tests for this area pass with the patch (349 passed): `test_anthropic_truncation_continuation`,
-`test_length_continuation_thinking_exhaustion`, `test_length_continuation_window_headroom`,
-`test_truncated_tool_call_boost`, `test_run_agent`, `test_first_chunk_at_hook`,
-`test_moa_observability_bridge`, `test_side_question_lease`, `test_stream_serving_provider`,
-`test_auxiliary_hooks`.
+`tests/agent/test_length_stopped_post_api_request.py` fails without the fix and passes with it.
+The nearby suites pass (322 tests across the truncation, continuation, hook and run-loop files),
+and `scripts/check` is clean.
