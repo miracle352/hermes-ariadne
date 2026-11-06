@@ -49,6 +49,8 @@ def _replaying(control: dict[str, Any]) -> bool:
 
 def _llm_execution(**kw: Any) -> Any:
     control = _mode()
+    if control.get("mode") == "warmup":
+        return runtime.synthetic_response(kw.get("api_mode") or "", "ok")
     if _replaying(control):
         rp = _active_replayer(control)
         if rp is not None:
@@ -62,6 +64,8 @@ def _llm_execution(**kw: Any) -> Any:
 
 def _tool_request(**kw: Any) -> Any:
     control = _mode()
+    if control.get("mode") == "warmup":
+        return {"args": dict(runtime.NEUTRAL_ARGS), "source": "ariadne"}
     if _replaying(control):
         rp = _active_replayer(control)
         return rp.tool_request(**kw) if rp is not None else {"args": dict(runtime.NEUTRAL_ARGS), "source": "ariadne"}
@@ -70,6 +74,8 @@ def _tool_request(**kw: Any) -> Any:
 
 def _tool_execution(**kw: Any) -> Any:
     control = _mode()
+    if control.get("mode") == "warmup":
+        return '{"error": "ariadne warm-up: nothing is executed"}'
     if _replaying(control):
         rp = _active_replayer(control)
         if rp is not None:

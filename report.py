@@ -24,6 +24,10 @@ def render(result: Any, max_diffs: int = 12) -> str:
         f"tools     {c('tool_match')} identical  ·  {c('tool_drift')} drifted  ·  {c('off_script_tool')} off-script",
         f"network   {c('aux_served')} auxiliary calls served locally  ·  {c('leak')} leaks",
     ]
+    sub = next((e.get("provider") for e in ev if e.get("type") == "provider_standin_diff" and e.get("provider")), None)
+    if sub:
+        lines.append(f"provider  replayed on a local stand-in for {sub.get('recorded')!r}; its request extras are compared apart "
+                     f"({c('provider_standin_diff')} calls differ there, not counted as drift)")
     shown = 0
     for e in ev:
         t = e.get("type")

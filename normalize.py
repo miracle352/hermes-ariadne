@@ -23,11 +23,38 @@ _MASKS: list[tuple[re.Pattern[str], str]] = [
 ]
 
 
+def path_variants(path: str, user_home: str | None = None) -> set[str]:
+    """Every spelling Hermes may use for one path: native, forward-slash, and ``~``-relative."""
+    if not path:
+        return set()
+    out = {path, path.replace("\\", "/")}
+    if user_home:
+        for h in {user_home, user_home.replace("\\", "/")}:
+            for p in list(out):
+                if p.lower().startswith(h.lower()) and len(p) > len(h):
+                    rest = p[len(h):].lstrip("\\/")
+                    out.add("~/" + rest.replace("\\", "/"))
+                    out.add("~\\" + rest)
+    return {p for p in out if len(p) > 3}
+
+
+def guess_user_home(path: str) -> str | None:
+    m = re.match(r"^([A-Za-z]:[\\/]Users[\\/][^\\/]+|/home/[^/]+|/Users/[^/]+|/root)", path or "")
+    return m.group(1) if m else None
+
+
 class Masker:
     """Applies volatile-value masks plus path rewrites (e.g. two different HERMES_HOME roots)."""
 
-    def __init__(self, path_aliases: dict[str, str] | None = None, extra: Iterable[tuple[str, str]] = ()):
-        self.path_aliases = sorted((path_aliases or {}).items(), key=lambda kv: -len(kv[0]))
+    def __init__(self, path_aliases: dict[str, str] | None = None, extra: Iterable[tuple[str, str]] = (),
+                 user_homes: Iterable[str] = ()):
+        expanded: dict[str, str] = {}
+        homes = [h for h in user_homes if h]
+        for src, alias in (path_aliases or {}).items():
+            uh = next((h for h in homes if src.lower().startswith(h.lower()) or src.replace("\\", "/").lower().startswith(h.replace("\\", "/").lower())), None)
+            for v in path_variants(src, uh):
+                expanded.setdefault(v, alias)
+        self.path_aliases = sorted(expanded.items(), key=lambda kv: -len(kv[0]))
         self.extra = [(re.compile(p), r) for p, r in extra]
 
     def text(self, s: str) -> str:

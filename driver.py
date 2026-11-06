@@ -32,6 +32,7 @@ from .stub import Stub
 
 PLUGIN_DIR = Path(__file__).resolve().parent
 DEAD_PROXY = "http://127.0.0.1:9"  # discard port: connections are refused
+FIRST_CONTACT_MARK = "This is the user's very first message ever"
 
 
 @dataclass
@@ -44,6 +45,9 @@ class PlayOptions:
     live_tools: bool = False
     extra_env: dict[str, str] = field(default_factory=dict)
     quiet: bool = False
+    provider: str | None = None        # None = the provider the cassette was recorded on
+    surface: str | None = None         # None = recorded platform (desktop / tui)
+    clone_home: str | None = None      # copy non-secret context (config, SOUL.md, memories, skills) from this home
 
 
 @dataclass
@@ -128,12 +132,65 @@ _DENY = {"approval": {"choice": "deny"}, "clarify": {}, "sudo": {"value": ""}, "
          "vault.code": {"value": ""}, "vault.unlock_prompt": {"value": ""}}
 
 
-def _scratch_config(tape: cas.Cassette, stub_port: int) -> str:
+def recorded_provider(tape: cas.Cassette) -> str:
+    first = next(iter(tape.of("llm")), {})
+    return tape.header.get("provider") or first.get("provider") or "custom"
+
+
+def _read_yaml(path: Path) -> dict[str, Any]:
+    if not path.is_file():
+        return {}
+    try:
+        import yaml  # type: ignore
+        data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except Exception:
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            data = {}
+    return data if isinstance(data, dict) else {}
+
+
+_SECRETISH = ("key", "token", "secret", "password", "passwd", "credential", "auth")
+
+
+def _strip_secrets(v: Any) -> Any:
+    if isinstance(v, dict):
+        return {k: _strip_secrets(x) for k, x in v.items()
+                if not (isinstance(k, str) and any(s in k.lower() for s in _SECRETISH))}
+    if isinstance(v, list):
+        return [_strip_secrets(x) for x in v]
+    return v
+
+
+# Context Hermes folds into the system prompt. Credentials (.env, auth.json, ...) are never copied.
+CONTEXT_FILES = ("SOUL.md", "AGENTS.md")
+CONTEXT_DIRS = ("memories", "skills")
+
+
+def clone_context(src: Path, dst: Path) -> None:
+    """Copy the non-secret context that shapes the system prompt from ``src`` into the scratch home."""
+    for name in CONTEXT_FILES:
+        if (src / name).is_file():
+            shutil.copy2(src / name, dst / name)
+    for name in CONTEXT_DIRS:
+        if (src / name).is_dir():
+            shutil.copytree(src / name, dst / name, dirs_exist_ok=True,
+                            ignore=shutil.ignore_patterns(".git", "__pycache__", "*.pyc", ".env", "*.key"))
+    cfg = _strip_secrets(_read_yaml(src / "config.yaml"))
+    if cfg:
+        (dst / "config.yaml").write_text(json.dumps(cfg, indent=2, default=str), encoding="utf-8")
+
+
+def _scratch_config(tape: cas.Cassette, stub_port: int, provider: str | None = None, existing: Path | None = None) -> str:
     h = tape.header
     model = h.get("model") or "ariadne-replay"
-    snap = h.get("config_snapshot") if isinstance(h.get("config_snapshot"), dict) else {}
+    provider = provider or "custom"
+    snap = _read_yaml(existing) if existing else {}
+    if not snap and isinstance(h.get("config_snapshot"), dict):
+        snap = h["config_snapshot"]
     cfg: dict[str, Any] = {k: v for k, v in snap.items() if k not in ("model", "providers", "custom_providers", "fallback_providers", "fallback_model")}
-    cfg["model"] = {"provider": "custom", "model": model, "base_url": f"http://127.0.0.1:{stub_port}/v1",
+    cfg["model"] = {"provider": provider, "model": model, "base_url": f"http://127.0.0.1:{stub_port}/v1",
                     "api_key": "ariadne-replay-offline"}
     plugins = cfg.get("plugins") if isinstance(cfg.get("plugins"), dict) else {}
     enabled = [p for p in (plugins.get("enabled") or []) if isinstance(p, str)]
@@ -189,12 +246,39 @@ def play(cassette_path: str | Path, opts: PlayOptions | None = None) -> PlayResu
 
     stub = Stub([e.get("response_text") or "" for e in tape.of("aux")], emit, model=tape.header.get("model") or "ariadne-replay")
     port = stub.start()
-    (scratch / "config.yaml").write_text(_scratch_config(tape, port), encoding="utf-8")
+    recorded = recorded_provider(tape)
+    # Signed-in providers (nous, codex, ...) cannot start without the user's credentials, which a
+    # replay never reads. Replays run on a local stand-in provider unless one is forced; the
+    # provider-specific request extras are then reported apart from Hermes drift.
+    provider = opts.provider or "custom"
+    if opts.clone_home:
+        clone_context(Path(opts.clone_home), scratch)
+    (scratch / "config.yaml").write_text(_scratch_config(tape, port, provider, scratch / "config.yaml"), encoding="utf-8")
     env = _child_env(scratch, opts)
+    surface = opts.surface or tape.header.get("platform") or "tui"
+    if surface == "desktop":
+        env["HERMES_DESKTOP"] = "1"
+    else:
+        env.pop("HERMES_DESKTOP", None)
     _install_into(scratch, opts, env)
 
+    ctl_dir = scratch / "plugin-data" / "ariadne"
+    ctl_dir.mkdir(parents=True, exist_ok=True)
+    first = next(iter(tape.of("llm")), {})
+    first_msgs = (first.get("request") or {}).get("messages") or []
+    recorded_first_contact = bool(first_msgs) and FIRST_CONTACT_MARK in json.dumps(first_msgs[:1], ensure_ascii=False)
+    if not recorded_first_contact:
+        # The recording came from an install with history; a scratch home has none, and Hermes would
+        # add its first-contact note. One offline warm-up turn makes the install "not new" first.
+        (ctl_dir / runtime.CONTROL_FILE).write_text(json.dumps({"mode": "warmup"}), encoding="utf-8")
+        stub.armed = False
+        drive_session(opts.hermes_python, env, str(run_dir), ["ariadne warm-up"], opts.turn_timeout)
+        stub.armed = True
+
     control = {"mode": "fork" if opts.fork_at else "replay", "cassette": str(Path(cassette_path).resolve()),
-               "report": str(report), "run_id": stamp, "fork_at": opts.fork_at, "live_tools": opts.live_tools}
+               "report": str(report), "run_id": stamp, "fork_at": opts.fork_at, "live_tools": opts.live_tools,
+               "provider_substituted": {"recorded": recorded, "replay": provider} if recorded != provider else None,
+               "soft_sections": ["params"] if recorded != provider else []}
     ctl_dir = scratch / "plugin-data" / "ariadne"
     ctl_dir.mkdir(parents=True, exist_ok=True)
     (ctl_dir / runtime.CONTROL_FILE).write_text(json.dumps(control), encoding="utf-8")

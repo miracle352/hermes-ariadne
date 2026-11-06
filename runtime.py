@@ -58,6 +58,10 @@ def hermes_home() -> str:
     return str(data_dir().parent.parent)
 
 
+def user_home() -> str:
+    return str(Path.home())
+
+
 def agent_cwd() -> str:
     try:
         from agent.runtime_cwd import resolve_agent_cwd
@@ -132,7 +136,7 @@ class Recorder:
         return session_id
 
     def _masker(self) -> normalize.Masker:
-        return normalize.Masker({hermes_home(): "$HERMES_HOME", agent_cwd(): "$CWD"})
+        return normalize.Masker({hermes_home(): "$HERMES_HOME", agent_cwd(): "$CWD"}, user_homes=[user_home()])
 
     def writer(self, session_id: str, ctx: dict[str, Any] | None = None) -> cas.Writer:
         ctx = ctx or {}
@@ -147,6 +151,7 @@ class Recorder:
                     "session_id": root,
                     "hermes_home": hermes_home(),
                     "cwd": agent_cwd(),
+                    "user_home": user_home(),
                     "platform": ctx.get("platform") or "",
                     "provider": ctx.get("provider") or "",
                     "model": ctx.get("model") or "",
@@ -281,10 +286,12 @@ class Replayer:
         self.forked = False
         self.extra = redact.compile_extra(control.get("extra_redact"))
         h = self.tape.header
+        rec_home = h.get("user_home") or normalize.guess_user_home(h.get("hermes_home", "")) or ""
         self.masker = normalize.Masker({
             h.get("hermes_home", ""): "$HERMES_HOME", h.get("cwd", ""): "$CWD",
             hermes_home(): "$HERMES_HOME", agent_cwd(): "$CWD",
-        })
+        }, user_homes=[rec_home, user_home()])
+        self.masker_recorded = self.masker
         self.emit("start", cassette=self.tape.id, llm_events=len(self.llm), tool_events=len(self.tools_in_order))
 
     def emit(self, type_: str, **data: Any) -> None:
@@ -316,9 +323,17 @@ class Replayer:
         if normalize.digest(live) == ev.get("request_digest") or live == recorded:
             self.emit("llm_match", n=n, seq=ev.get("seq"))
         else:
+            soft = set(self.control.get("soft_sections") or [])
             diffs = normalize.diff(recorded, live)
-            self.emit("llm_drift", n=n, seq=ev.get("seq"),
-                      sections=sorted({normalize.section_of(d["path"]) for d in diffs}), diffs=diffs)
+            hard = [d for d in diffs if normalize.section_of(d["path"]) not in soft]
+            softd = [d for d in diffs if normalize.section_of(d["path"]) in soft]
+            if hard:
+                self.emit("llm_drift", n=n, seq=ev.get("seq"),
+                          sections=sorted({normalize.section_of(d["path"]) for d in hard}), diffs=hard)
+            else:
+                self.emit("llm_match", n=n, seq=ev.get("seq"), soft=True)
+            if softd:
+                self.emit("provider_standin_diff", n=n, diffs=softd, provider=self.control.get("provider_substituted"))
         if ev.get("lossy"):
             self.emit("lossy_response", n=n, paths=ev["lossy"])
         return codec.decode(ev["response"])

@@ -22,9 +22,12 @@ class Stub:
         self.model = model
         self.lock = threading.Lock()
         self.server: ThreadingHTTPServer | None = None
+        self.armed = True  # False during warm-up: aux calls get a placeholder and keep the recorded queue
 
     def _next_aux(self) -> str:
         with self.lock:
+            if not self.armed:
+                return "Warm-up"
             return self.aux.pop(0) if self.aux else "Replayed session"
 
     def start(self) -> int:
@@ -58,12 +61,14 @@ class Stub:
                 if not (path.endswith("/chat/completions") or path.endswith("/messages") or path.endswith("/responses")):
                     self._send(200, {})
                     return
-                if body.get("tools"):
+                if body.get("tools") and stub.armed:
                     stub.on_event("leak", {"path": path, "note": "a main-loop model call reached the network stand-in"})
                     self._send(503, {"error": {"message": "ariadne replay: model calls are served from the cassette"}})
                     return
+                armed = stub.armed
                 text = stub._next_aux()
-                stub.on_event("aux_served", {"path": path})
+                if armed:
+                    stub.on_event("aux_served", {"path": path})
                 usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
                 if path.endswith("/messages"):
                     msg = {"id": "ariadne-aux", "type": "message", "role": "assistant", "model": stub.model,
