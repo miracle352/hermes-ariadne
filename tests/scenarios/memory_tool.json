@@ -1,0 +1,23 @@
+{
+ "name": "memory_tool",
+ "turns": [
+  "remember that my favourite colour is teal"
+ ],
+ "script": [
+  {
+   "tool_calls": [
+    {
+     "name": "memory",
+     "arguments": {
+      "action": "add",
+      "target": "user",
+      "content": "Favourite colour: teal"
+     }
+    }
+   ]
+  },
+  {
+   "text": "Saved."
+  }
+ ]
+}

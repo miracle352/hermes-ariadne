@@ -20,6 +20,11 @@ _MASKS: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"\b\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?\b"), "<datetime>"),
     (re.compile(r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b", re.I), "<uuid>"),
     (re.compile(r"\b\d{8}_\d{6}(?:_[0-9a-f]{4,})?\b"), "<session-stamp>"),
+    # runtime-minted ids Hermes puts in tool results (delegations, background processes, jobs)
+    (re.compile(r"\b(deleg|proc|job|bg|sub|subagent|run)_[0-9a-f]{6,}\b"), r"<\1-id>"),
+    (re.compile(r"\bsa-\d+-[0-9a-f]{6,}\b"), "<subagent-id>"),
+    # wall-clock durations Hermes reports back to the model ("Total duration: 0.44s", "(0s ago)")
+    (re.compile(r"(?<![\w.])\d+(?:\.\d+)?(?:ms|s)\b"), "<duration>"),
 ]
 
 

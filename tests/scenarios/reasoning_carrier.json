@@ -1,0 +1,17 @@
+{
+ "name": "reasoning_carrier",
+ "turns": [
+  "think, then answer",
+  "and again"
+ ],
+ "script": [
+  {
+   "text": "Answer one.",
+   "reasoning_content": "step 1: consider. step 2: answer."
+  },
+  {
+   "text": "Answer two.",
+   "reasoning_content": "second thoughts."
+  }
+ ]
+}

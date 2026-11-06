@@ -106,6 +106,17 @@ def _approval(phase: str):
     return hook
 
 
+def _subagent_start(**kw: Any) -> None:
+    control = _mode()
+    if control.get("mode") == "record":
+        _recorder_get().on_subagent_start(**kw)
+    elif _replaying(control):
+        rp = _active_replayer(control)
+        if rp is not None:
+            rp.on_subagent_start(**kw)
+    return None
+
+
 def register(ctx: Any) -> None:
     try:
         runtime.CONTROL.setting_record = bool(ctx.get_config("record", default=False))
@@ -119,7 +130,7 @@ def register(ctx: Any) -> None:
     ctx.register_hook("pre_llm_call", _when_recording("on_pre_llm_call"))
     ctx.register_hook("post_auxiliary_call", _when_recording("on_post_auxiliary_call"))
     ctx.register_hook("post_compaction", _when_recording("on_post_compaction"))
-    ctx.register_hook("subagent_start", _when_recording("on_subagent_start"))
+    ctx.register_hook("subagent_start", _subagent_start)
     ctx.register_hook("pre_approval_request", _approval("request"))
     ctx.register_hook("post_approval_response", _approval("response"))
 

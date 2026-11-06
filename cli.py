@@ -35,6 +35,13 @@ def setup_argparse(parser: argparse.ArgumentParser) -> None:
     play.add_argument("--no-clone", action="store_true",
                       help="Do not copy this profile's skills, memories, SOUL.md and config (never credentials) into the replay")
 
+    cmp = subs.add_parser("compare", help="Replay one cassette on two Hermes installs and show what Hermes changed")
+    cmp.add_argument("cassette", help="Cassette id, prefix, path, or `latest`")
+    cmp.add_argument("--a", required=True, help="Python interpreter of Hermes install A (the baseline)")
+    cmp.add_argument("--b", default=sys.executable, help="Python interpreter of Hermes install B (default: this one)")
+    cmp.add_argument("--json", action="store_true")
+    cmp.add_argument("--timeout", type=float, default=300.0)
+
     parser.set_defaults(func=handle)
 
 
@@ -76,6 +83,8 @@ def handle(args: argparse.Namespace) -> int:
         return _cmd_show(resolve(args.cassette))
     if cmd == "play":
         return _cmd_play(args)
+    if cmd == "compare":
+        return _cmd_compare(args)
     print("usage: hermes ariadne {record,list,show,play} ...")
     return 2
 
@@ -142,3 +151,12 @@ def _cmd_play(args: argparse.Namespace) -> int:
     else:
         print(report.render(result))
     return {"identical": 0, "drift": 1}.get(result.verdict, 2)
+
+
+def _cmd_compare(args: argparse.Namespace) -> int:
+    from . import compare, driver
+    path = resolve(args.cassette)
+    c = compare.compare(path, args.a, args.b, label_a="A", label_b="B",
+                        opts=driver.PlayOptions(turn_timeout=args.timeout, clone_home=runtime.hermes_home()))
+    print(json.dumps(c.to_json(), indent=2, ensure_ascii=False) if args.json else compare.render(c))
+    return 0 if c.verdict == "same" else 1

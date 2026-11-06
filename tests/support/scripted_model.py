@@ -35,20 +35,33 @@ class ScriptedModel:
                 return None
             if not request.get("tools"):
                 return {"text": "Scripted auxiliary reply"}
-            if self.script:
-                return self.script.pop(0)
+            first_user = next((m.get("content") for m in request.get("messages") or []
+                               if isinstance(m, dict) and m.get("role") == "user"), "") or ""
+            first_user = first_user if isinstance(first_user, str) else json.dumps(first_user)
+            # Entries with "for" go only to the agent whose first user message contains it
+            # (e.g. a subagent's goal); the rest are served in order to everyone else.
+            for i, entry in enumerate(self.script):
+                if entry.get("for") and entry["for"] in first_user:
+                    return self.script.pop(i)
+            for i, entry in enumerate(self.script):
+                if not entry.get("for"):
+                    return self.script.pop(i)
             return {"text": "(script exhausted)"}
 
 
 def _message(reply: dict, n: int) -> dict:
+    """Script keys: text, tool_calls [{name, arguments: dict | raw str}], reasoning_content, refusal."""
     msg: dict = {"role": "assistant", "content": reply.get("text")}
     if reply.get("tool_calls"):
-        msg["content"] = reply.get("text")
         msg["tool_calls"] = [
             {"id": f"call_{n}_{i}", "type": "function",
-             "function": {"name": tc["name"], "arguments": json.dumps(tc.get("arguments", {}))}}
+             "function": {"name": tc["name"],
+                          "arguments": tc["arguments"] if isinstance(tc.get("arguments"), str) else json.dumps(tc.get("arguments", {}))}}
             for i, tc in enumerate(reply["tool_calls"])
         ]
+    for key in ("reasoning_content", "refusal"):
+        if key in reply:
+            msg[key] = reply[key]
     return msg
 
 
@@ -80,7 +93,7 @@ def make_handler(model: ScriptedModel):
                 return
             n = model.calls
             msg = _message(reply, n)
-            finish = "tool_calls" if msg.get("tool_calls") else "stop"
+            finish = reply.get("finish_reason") or ("tool_calls" if msg.get("tool_calls") else "stop")
             usage = {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}
             base = {"id": f"chatcmpl-{n}", "created": 1700000000 + n, "model": request.get("model", "scripted")}
             if not request.get("stream"):
@@ -99,6 +112,9 @@ def make_handler(model: ScriptedModel):
             delta: dict = {"role": "assistant"}
             if msg.get("content"):
                 delta["content"] = msg["content"]
+            for key in ("reasoning_content", "refusal"):
+                if msg.get(key):
+                    delta[key] = msg[key]
             if msg.get("tool_calls"):
                 delta["tool_calls"] = [{**tc, "index": i} for i, tc in enumerate(msg["tool_calls"])]
             send({"choices": [{"index": 0, "delta": delta, "finish_reason": None}]})

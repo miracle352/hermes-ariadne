@@ -1,0 +1,21 @@
+{
+ "name": "unknown_tool",
+ "turns": [
+  "use the frobnicate tool"
+ ],
+ "script": [
+  {
+   "tool_calls": [
+    {
+     "name": "frobnicate",
+     "arguments": {
+      "x": 1
+     }
+    }
+   ]
+  },
+  {
+   "text": "That tool does not exist."
+  }
+ ]
+}

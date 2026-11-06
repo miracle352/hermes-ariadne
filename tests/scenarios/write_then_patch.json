@@ -1,0 +1,44 @@
+{
+ "name": "write_then_patch",
+ "turns": [
+  "create a.txt with 'one', then change it to 'two'"
+ ],
+ "script": [
+  {
+   "tool_calls": [
+    {
+     "name": "write_file",
+     "arguments": {
+      "path": "{P}/a.txt",
+      "content": "one\n"
+     }
+    }
+   ]
+  },
+  {
+   "tool_calls": [
+    {
+     "name": "patch",
+     "arguments": {
+      "path": "{P}/a.txt",
+      "old_string": "one",
+      "new_string": "two"
+     }
+    }
+   ]
+  },
+  {
+   "tool_calls": [
+    {
+     "name": "read_file",
+     "arguments": {
+      "path": "{P}/a.txt"
+     }
+    }
+   ]
+  },
+  {
+   "text": "a.txt now says two."
+  }
+ ]
+}

@@ -1,0 +1,14 @@
+{
+ "name": "empty_then_text",
+ "turns": [
+  "say ok"
+ ],
+ "script": [
+  {
+   "text": ""
+  },
+  {
+   "text": "ok"
+  }
+ ]
+}

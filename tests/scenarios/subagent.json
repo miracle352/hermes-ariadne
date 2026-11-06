@@ -1,0 +1,28 @@
+{
+ "name": "subagent",
+ "turns": [
+  "delegate: count to three"
+ ],
+ "script": [
+  {
+   "tool_calls": [
+    {
+     "name": "delegate_task",
+     "arguments": {
+      "goal": "Count to three and report."
+     }
+    }
+   ]
+  },
+  {
+   "text": "Started a subagent; I'll report when it finishes."
+  },
+  {
+   "for": "Count to three",
+   "text": "1, 2, 3."
+  },
+  {
+   "text": "The subagent counted to three."
+  }
+ ]
+}

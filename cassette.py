@@ -28,6 +28,15 @@ FORMAT = "cassette/1"
 SUFFIX = ".cassette.jsonl"
 
 
+# Turns Hermes starts by itself (async delegation results, background-process completions).
+# During replay Hermes injects them again on its own, so the driver must not type them.
+INJECTED_PREFIXES = ("[ASYNC DELEGATION", "[BACKGROUND PROCESS", "[PROCESS COMPLETE", "[DELEGATION RESULT")
+
+
+def is_injected(message: Any) -> bool:
+    return isinstance(message, str) and message.lstrip().upper().startswith(INJECTED_PREFIXES)
+
+
 def new_id(session_id: str) -> str:
     stamp = time.strftime("%Y%m%d-%H%M%S", time.gmtime())
     tail = "".join(ch for ch in (session_id or "") if ch.isalnum())[-8:] or "nosess"
@@ -72,7 +81,11 @@ class Cassette:
         return [e for e in self.events if e.get("kind") == kind]
 
     def turns(self) -> list[dict[str, Any]]:
-        return self.of("turn")
+        """User turns only: a subagent's task arrives through pre_llm_call too, but the parent
+        agent creates it during replay by itself, so it must never be typed in as user input."""
+        children = {e.get("child_session_id") for e in self.of("subagent")}
+        return [t for t in self.of("turn") if not t.get("subagent") and t.get("session_id") not in children
+                and not is_injected(t.get("user_message"))]
 
 
 class CassetteError(Exception):

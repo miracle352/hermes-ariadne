@@ -1,0 +1,21 @@
+{
+ "name": "huge_tool_output",
+ "turns": [
+  "print a lot"
+ ],
+ "script": [
+  {
+   "tool_calls": [
+    {
+     "name": "terminal",
+     "arguments": {
+      "command": "python3 -c \"print('x' * 300000)\""
+     }
+    }
+   ]
+  },
+  {
+   "text": "Printed."
+  }
+ ]
+}

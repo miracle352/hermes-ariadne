@@ -1,0 +1,12 @@
+{
+ "name": "refusal",
+ "turns": [
+  "do the forbidden thing"
+ ],
+ "script": [
+  {
+   "text": null,
+   "refusal": "I can't help with that."
+  }
+ ]
+}

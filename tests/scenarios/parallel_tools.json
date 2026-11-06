@@ -1,0 +1,27 @@
+{
+ "name": "parallel_tools",
+ "turns": [
+  "read notes.txt and print the date"
+ ],
+ "script": [
+  {
+   "tool_calls": [
+    {
+     "name": "read_file",
+     "arguments": {
+      "path": "{P}/notes.txt"
+     }
+    },
+    {
+     "name": "terminal",
+     "arguments": {
+      "command": "echo 2026-01-01"
+     }
+    }
+   ]
+  },
+  {
+   "text": "notes.txt says hello; date printed."
+  }
+ ]
+}

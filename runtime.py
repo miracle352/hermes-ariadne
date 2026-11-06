@@ -32,6 +32,10 @@ from . import codec, normalize, redact
 logger = logging.getLogger("ariadne")
 
 NEUTRAL_ARGS = {"__ariadne_replay__": True}
+# Agent-internal tools that only start more agent work inside Hermes. During replay they run
+# for real so the subagent exists; everything that subagent does (model calls, tools) is still
+# served from the cassette and neutralised like any other call.
+INTERNAL_TOOLS = frozenset({"delegate_task"})
 CONTROL_FILE = "control.json"
 
 
@@ -219,8 +223,10 @@ class Recorder:
 
     # -- hooks ----------------------------------------------------------------
     def on_pre_llm_call(self, **kw: Any) -> None:
-        self._safe(lambda: self.writer(kw.get("session_id", ""), kw).append(
-            "turn", session_id=kw.get("session_id"), turn_id=kw.get("turn_id"),
+        sid = kw.get("session_id") or ""
+        subagent = bool(sid) and self._root(sid) != sid
+        self._safe(lambda: self.writer(sid, kw).append(
+            "turn", session_id=kw.get("session_id"), turn_id=kw.get("turn_id"), subagent=subagent,
             is_first_turn=bool(kw.get("is_first_turn")),
             user_message=redact.scrub(normalize._jsonable(kw.get("user_message")), self.extra),
             platform=kw.get("platform")))
@@ -246,7 +252,13 @@ class Recorder:
             before_tokens=kw.get("before_tokens"), after_tokens=kw.get("after_tokens")))
 
     def on_subagent_start(self, **kw: Any) -> None:
-        self.link(kw.get("child_session_id") or "", kw.get("parent_session_id") or kw.get("session_id") or "")
+        child = kw.get("child_session_id") or ""
+        parent = kw.get("parent_session_id") or kw.get("session_id") or ""
+        self.link(child, parent)
+        if parent and self._root(parent) in self.writers:
+            self._safe(lambda: self.writer(parent).append(
+                "subagent", child_session_id=child, parent_session_id=parent,
+                goal=redact.scrub_text(str(kw.get("goal") or ""))[:2000]))
 
     def on_approval(self, phase: str) -> Callable[..., None]:
         def hook(**kw: Any) -> None:
@@ -278,6 +290,16 @@ class Replayer:
         self.lock = threading.Lock()
         self.llm = self.tape.of("llm")
         self.llm_pos = 0
+        # Parent and subagents run concurrently, so each agent gets its own queue. The recorded
+        # root session is the cassette's; recorded children come from `subagent` events, in order.
+        self.rec_root = self.tape.header.get("session_id") or (self.llm[0].get("session_id") if self.llm else "")
+        self.rec_children = [e.get("child_session_id") for e in self.tape.of("subagent")]
+        self.queues: dict[str, list[dict[str, Any]]] = {}
+        for ev in self.llm:
+            self.queues.setdefault(self._rec_key(ev.get("session_id") or ""), []).append(ev)
+        self.qpos: dict[str, int] = {}
+        self.live_root: str | None = None
+        self.live_children: dict[str, str] = {}
         self.tools_by_id = {e["tool_call_id"]: e for e in self.tape.of("tool") if e.get("tool_call_id")}
         self.tools_in_order = self.tape.of("tool")
         self.tool_pos = 0
@@ -294,6 +316,37 @@ class Replayer:
         self.masker_recorded = self.masker
         self.emit("start", cassette=self.tape.id, llm_events=len(self.llm), tool_events=len(self.tools_in_order))
 
+    def _rec_key(self, rec_sid: str) -> str:
+        if rec_sid in self.rec_children:
+            return f"child:{self.rec_children.index(rec_sid)}"
+        return "root"
+
+    def on_subagent_start(self, **kw: Any) -> None:
+        child = kw.get("child_session_id") or ""
+        with self.lock:
+            if child and child not in self.live_children:
+                self.live_children[child] = f"child:{len(self.live_children)}"
+
+    def _live_key(self, live_sid: str) -> str:
+        with self.lock:
+            if live_sid in self.live_children:
+                return self.live_children[live_sid]
+            if self.live_root is None:
+                self.live_root = live_sid
+            return "root"
+
+    def expected_llm(self) -> int:
+        return len(self.llm)
+
+    def _save_live(self, kind: str, **data: Any) -> None:
+        """What this Hermes actually built, for differential comparison between two installs."""
+        path = self.control.get("live_path")
+        if not path:
+            return
+        with self.lock:
+            with open(path, "a", encoding="utf-8") as fh:
+                fh.write(json.dumps({"kind": kind, **data}, ensure_ascii=False, sort_keys=True, default=str) + "\n")
+
     def emit(self, type_: str, **data: Any) -> None:
         with self.lock:
             with open(self.report_path, "a", encoding="utf-8") as fh:
@@ -302,11 +355,16 @@ class Replayer:
 
     # -- model ------------------------------------------------------------------
     def llm_execution(self, **kw: Any) -> Any:
+        key = self._live_key(kw.get("session_id") or "")
         with self.lock:
             index = self.llm_pos
             self.llm_pos += 1
+            qi = self.qpos.get(key, 0)
+            self.qpos[key] = qi + 1
         n = index + 1
+        queue = self.queues.get(key, [])
         live = normalize.prepare(kw["request"], self.masker, self.extra)
+        self._save_live("llm", n=n, agent=key, request=live)
         if self.fork_at and n >= int(self.fork_at):
             self.forked = True
             self.emit("fork_live_call", n=n, request_digest=normalize.digest(live))
@@ -314,16 +372,16 @@ class Replayer:
             encoded, _ = codec.encode_checked(response)
             self.emit("fork_response", n=n, response=redact.scrub(encoded, self.extra))
             return response
-        if index >= len(self.llm):
-            self.emit("extra_llm_call", n=n, request_digest=normalize.digest(live),
+        if qi >= len(queue):
+            self.emit("extra_llm_call", n=n, agent=key, request_digest=normalize.digest(live),
                       note="Hermes asked the model for more than the cassette holds")
             return synthetic_response(kw.get("api_mode") or "", "[ariadne] cassette exhausted: this call did not happen in the recording.")
-        ev = self.llm[index]
+        ev = queue[qi]
         # Re-mask the recorded side too: masks are idempotent, and a cassette written by an older
         # recorder may predate a mask.
         recorded = self.masker.tree(ev.get("request") or {})
         if normalize.digest(live) == ev.get("request_digest") or live == recorded:
-            self.emit("llm_match", n=n, seq=ev.get("seq"))
+            self.emit("llm_match", n=n, agent=key, seq=ev.get("seq"))
         else:
             soft = set(self.control.get("soft_sections") or [])
             substituted = bool(self.control.get("provider_substituted"))
@@ -359,12 +417,15 @@ class Replayer:
     def tool_request(self, **kw: Any) -> dict[str, Any] | None:
         if self.forked and self.control.get("live_tools"):
             return None
+        if kw.get("tool_name") in INTERNAL_TOOLS:
+            return None
         return {"args": dict(NEUTRAL_ARGS), "source": "ariadne", "reason": "replay: tools never execute"}
 
     def tool_execution(self, **kw: Any) -> Any:
         tool_name = kw.get("tool_name")
         call_id = kw.get("tool_call_id")
         live_args = redact.scrub(normalize._jsonable(kw.get("original_args", kw.get("args"))), self.extra)
+        self._save_live("tool", tool_name=tool_name, tool_call_id=call_id, args=self.masker.tree(live_args))
         if self.forked and self.control.get("live_tools"):
             self.emit("fork_live_tool", tool_name=tool_name, tool_call_id=call_id)
             return kw["next_call"](kw.get("original_args", kw.get("args")))
@@ -379,6 +440,10 @@ class Replayer:
                         break
             if ev is not None and ev.get("tool_call_id"):
                 self.used_tool_ids.add(ev["tool_call_id"])
+        if tool_name in INTERNAL_TOOLS:
+            result = kw["next_call"](kw.get("args"))
+            self.emit("internal_tool_ran", tool_name=tool_name, tool_call_id=call_id, matched=ev is not None)
+            return result
         if ev is None:
             self.emit("off_script_tool", tool_name=tool_name, tool_call_id=call_id, args=live_args,
                       note="the model asked for a tool call the recording never made")

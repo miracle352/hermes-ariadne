@@ -276,7 +276,7 @@ def play(cassette_path: str | Path, opts: PlayOptions | None = None) -> PlayResu
         stub.armed = True
 
     control = {"mode": "fork" if opts.fork_at else "replay", "cassette": str(Path(cassette_path).resolve()),
-               "report": str(report), "run_id": stamp, "fork_at": opts.fork_at, "live_tools": opts.live_tools,
+               "report": str(report), "live_path": str(run_dir / "live.jsonl"), "run_id": stamp, "fork_at": opts.fork_at, "live_tools": opts.live_tools,
                "provider_substituted": {"recorded": recorded, "replay": provider} if recorded != provider else None,
                "soft_sections": ["params"] if recorded != provider else []}
     ctl_dir = scratch / "plugin-data" / "ariadne"
@@ -288,8 +288,21 @@ def play(cassette_path: str | Path, opts: PlayOptions | None = None) -> PlayResu
     turns = [t if isinstance(t, str) else json.dumps(t) for t in turns if t is not None]
     if opts.fork_prompt:
         turns.append(opts.fork_prompt)
+    expected = len(tape.of("llm"))
+
+    def drained() -> bool:
+        served = 0
+        try:
+            for line in report.read_text(encoding="utf-8").splitlines():
+                if '"llm_match"' in line or '"llm_drift"' in line or '"extra_llm_call"' in line:
+                    served += 1
+        except OSError:
+            return True
+        return served >= expected
+
     try:
-        replies, errors, sent, stderr_tail = drive_session(opts.hermes_python, env, cwd, turns, opts.turn_timeout)
+        replies, errors, sent, stderr_tail = drive_session(opts.hermes_python, env, cwd, turns, opts.turn_timeout,
+                                                           drain=None if opts.fork_at else drained)
     finally:
         stub.stop()
     if errors and stderr_tail:
@@ -315,7 +328,7 @@ def play(cassette_path: str | Path, opts: PlayOptions | None = None) -> PlayResu
 
 
 def drive_session(hermes_python: str, env: dict[str, str], cwd: str, turns: list[str],
-                  turn_timeout: float = 300.0) -> tuple[list[str], list[str], int, list[str]]:
+                  turn_timeout: float = 300.0, drain=None, idle: float = 8.0) -> tuple[list[str], list[str], int, list[str]]:
     """Run ``turns`` through one Hermes session over the TUI-gateway protocol.
 
     Every approval or other human prompt is refused. Returns (replies, errors, turns_sent, stderr_tail).
@@ -332,6 +345,17 @@ def drive_session(hermes_python: str, env: dict[str, str], cwd: str, turns: list
             replies.append(reply if reply is not None else "")
             if reply is None:
                 break
+        # Hermes may start turns by itself after the last user turn (async subagent results).
+        # Keep answering until the cassette is drained or nothing happens for `idle` seconds.
+        if sid and drain is not None and not errors:
+            deadline = time.monotonic() + turn_timeout
+            last = time.monotonic()
+            while time.monotonic() < deadline and not drain():
+                got = _wait(client, lambda m: True if (m.get("params") or {}).get("type") == "message.complete" else None, 1.0, [])
+                if got:
+                    last = time.monotonic()
+                elif time.monotonic() - last > idle:
+                    break
     finally:
         client.close()
     return replies, errors, sent, client.stderr_tail

@@ -1,0 +1,19 @@
+{
+ "name": "malformed_tool_args",
+ "turns": [
+  "run echo hi"
+ ],
+ "script": [
+  {
+   "tool_calls": [
+    {
+     "name": "terminal",
+     "arguments": "{\"command\": \"echo hi\""
+    }
+   ]
+  },
+  {
+   "text": "Ran it."
+  }
+ ]
+}
