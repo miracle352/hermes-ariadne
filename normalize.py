@@ -210,6 +210,7 @@ _ENV_LINES = [
     re.compile(r"^OS:.*$", re.M),
     re.compile(r"^Conversation started:.*$", re.M),   # the date: a replay on another day must still match
     re.compile(r"^Host:.*$", re.M),
+    re.compile(r"^User home directory:.*$", re.M),
 ]
 _PROVIDER_LINE = re.compile(r"^Provider: .*$", re.M)
 
