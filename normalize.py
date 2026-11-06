@@ -242,3 +242,21 @@ def environment_delta(rec_env: dict[str, Any], live_env: dict[str, Any]) -> dict
     if rl != ll:
         out["lines"] = {"recorded": rl, "live": ll}
     return out
+
+
+# Hermes appends a one-time note to an install's very first user message. Whether it appears
+# depends on the install's history, not on how Hermes builds requests.
+_FIRST_CONTACT = re.compile(r"\s*\[System note: This is the user's very first message ever\.[\s\S]*?\]\s*$")
+
+
+def strip_first_contact(messages: list[Any]) -> tuple[list[Any], bool]:
+    found = False
+    out = []
+    for m in messages:
+        if isinstance(m, dict) and m.get("role") == "user" and isinstance(m.get("content"), str):
+            new = _FIRST_CONTACT.sub("", m["content"])
+            if new != m["content"]:
+                found = True
+                m = {**m, "content": new}
+        out.append(m)
+    return out, found

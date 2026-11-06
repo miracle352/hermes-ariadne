@@ -85,7 +85,10 @@ class Control:
         self.setting_record = False
 
     def get(self) -> dict[str, Any]:
-        path = data_dir() / CONTROL_FILE
+        # A replay/fork child started by `hermes ariadne` gets its own control file through the
+        # environment; other processes on the same profile (an open Desktop) never see it.
+        override = os.environ.get("HERMES_ARIADNE_CONTROL")
+        path = Path(override) if override else data_dir() / CONTROL_FILE
         try:
             mtime = path.stat().st_mtime
         except OSError:
@@ -296,7 +299,7 @@ class Replayer:
         self.control = control
         self.tape = cas.load(control["cassette"])
         self.report_path = Path(control["report"])
-        self.lock = threading.Lock()
+        self.lock = threading.RLock()  # emit() is called while the lock is held
         self.llm = self.tape.of("llm")
         self.llm_pos = 0
         # Parent and subagents run concurrently, so each agent gets its own queue. The recorded
@@ -397,6 +400,12 @@ class Replayer:
             rec_core, rec_env = normalize.split_environment(recorded.get("system") or [], substituted)
             live_core, live_env = normalize.split_environment(live.get("system") or [], substituted)
             env_delta = normalize.environment_delta(rec_env, live_env)
+            rec_msgs, rec_fc = normalize.strip_first_contact(recorded.get("messages") or [])
+            live_msgs, live_fc = normalize.strip_first_contact(live.get("messages") or [])
+            if rec_fc != live_fc:
+                env_delta["first_contact_note"] = {"recorded": rec_fc, "live": live_fc}
+            recorded = {**recorded, "messages": rec_msgs}
+            live = {**live, "messages": live_msgs}
             if env_delta:
                 self.emit("environment_diff", n=n, **env_delta)
             recorded = {**recorded, "system": rec_core}
@@ -438,6 +447,8 @@ class Replayer:
         if self.forked and self.control.get("live_tools"):
             self.emit("fork_live_tool", tool_name=tool_name, tool_call_id=call_id)
             return kw["next_call"](kw.get("original_args", kw.get("args")))
+        if self.forked:
+            return self._forked_tool(tool_name, call_id, live_args, kw)
         with self.lock:
             ev = self.tools_by_id.get(call_id) if call_id else None
             if ev is None and not call_id:
@@ -464,6 +475,26 @@ class Replayer:
         self.emit("tool_drift" if drift else "tool_match", tool_name=tool_name, tool_call_id=call_id,
                   seq=ev.get("seq"), diffs=drift)
         return codec.decode(ev["result"])
+
+    def _forked_tool(self, tool_name: Any, call_id: Any, live_args: Any, kw: dict[str, Any]) -> Any:
+        """After the fork point the live model mints new call ids. A call identical to an unused
+        recorded one (same tool, same arguments) gets the recorded result; anything else is
+        refused without running, so the world stays frozen."""
+        if tool_name in INTERNAL_TOOLS:
+            return kw["next_call"](kw.get("args"))
+        want = (tool_name, json.dumps(self.masker.tree(live_args), sort_keys=True))
+        with self.lock:
+            for ev in self.tools_in_order:
+                cid = ev.get("tool_call_id")
+                if cid in self.used_tool_ids:
+                    continue
+                if (ev.get("tool_name"), json.dumps(self.masker.tree(ev.get("args")), sort_keys=True)) == want:
+                    self.used_tool_ids.add(cid)
+                    self.emit("fork_tool_frozen", tool_name=tool_name, tool_call_id=call_id, recorded_seq=ev.get("seq"))
+                    return codec.decode(ev["result"])
+        self.emit("fork_tool_refused", tool_name=tool_name, tool_call_id=call_id, args=live_args)
+        return json.dumps({"error": "ariadne fork: this tool call is new after the fork point and the world is frozen; "
+                                    "nothing was executed (rerun with --live-tools to allow real tools)"})
 
     def finish(self) -> None:
         self.emit("finish", llm_served=min(self.llm_pos, len(self.llm)), llm_total=len(self.llm),

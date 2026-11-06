@@ -51,6 +51,17 @@ def setup_argparse(parser: argparse.ArgumentParser) -> None:
     bis.add_argument("--json", action="store_true")
     bis.add_argument("--timeout", type=float, default=300.0)
 
+    fk = subs.add_parser("fork", help="Replay up to a point, then let the live model take over")
+    fk.add_argument("cassette", help="Cassette id, prefix, path, or `latest`")
+    where = fk.add_mutually_exclusive_group(required=True)
+    where.add_argument("--at", type=int, help="Model call number where the live model takes over")
+    where.add_argument("--at-turn", type=int, help="User turn number to replace (use with --prompt)")
+    fk.add_argument("--prompt", help="A different user message at the fork point")
+    fk.add_argument("--continue", dest="continue_turns", action="store_true", help="Also send the recorded turns after the fork point")
+    fk.add_argument("--live-tools", action="store_true", help="Let tools run for real after the fork point (approvals apply)")
+    fk.add_argument("--json", action="store_true")
+    fk.add_argument("--timeout", type=float, default=300.0)
+
     parser.set_defaults(func=handle)
 
 
@@ -96,6 +107,8 @@ def handle(args: argparse.Namespace) -> int:
         return _cmd_compare(args)
     if cmd == "bisect":
         return _cmd_bisect(args)
+    if cmd == "fork":
+        return _cmd_fork(args)
     print("usage: hermes ariadne {record,list,show,play} ...")
     return 2
 
@@ -185,3 +198,15 @@ def _cmd_bisect(args: argparse.Namespace) -> int:
         return 2
     print(json.dumps(r.to_json(), indent=2, ensure_ascii=False) if args.json else bisect.render(r))
     return 0 if r.first_bad is None else 1
+
+
+def _cmd_fork(args: argparse.Namespace) -> int:
+    from . import fork
+    try:
+        r = fork.fork(resolve(args.cassette), at_call=args.at, at_turn=args.at_turn, prompt=args.prompt,
+                      live_tools=args.live_tools, continue_turns=args.continue_turns, turn_timeout=args.timeout)
+    except ValueError as exc:
+        print(f"ariadne fork: {exc}")
+        return 2
+    print(json.dumps(r.to_json(), indent=2, ensure_ascii=False) if args.json else fork.render(r))
+    return 0 if r.prefix_identical and not r.errors else 1
