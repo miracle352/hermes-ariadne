@@ -69,6 +69,10 @@ def record(scn: dict, python_a: str, work: Path) -> Path | None:
         print(f"    record failed: {errors[:2]}")
         return None
     os.environ["HERMES_HOME"] = str(home)
+    save = os.environ.get("ARIADNE_SAVE_CASSETTES")
+    if save:
+        Path(save).mkdir(parents=True, exist_ok=True)
+        shutil.copy2(tapes[-1], Path(save) / f"{scn['name']}.cassette.jsonl")
     return tapes[-1]
 
 

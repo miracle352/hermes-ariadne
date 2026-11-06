@@ -48,6 +48,7 @@ class PlayOptions:
     provider: str | None = None        # None = the provider the cassette was recorded on
     surface: str | None = None         # None = recorded platform (desktop / tui)
     clone_home: str | None = None      # copy non-secret context (config, SOUL.md, memories, skills) from this home
+    extra_plugins: list[str] = field(default_factory=list)  # plugin dirs to load next to Ariadne (e.g. the plugin under test)
 
 
 @dataclass
@@ -187,6 +188,16 @@ def _scratch_config(tape: cas.Cassette, stub_port: int, provider: str | None = N
         return json.dumps(cfg, indent=2)  # JSON is valid YAML
 
 
+def _read_yaml_text(text: str) -> dict[str, Any]:
+    import tempfile
+    with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False, encoding="utf-8") as fh:
+        fh.write(text)
+    try:
+        return _read_yaml(Path(fh.name))
+    finally:
+        os.unlink(fh.name)
+
+
 def _child_env(scratch: Path, opts: PlayOptions) -> dict[str, str]:
     env = {k: v for k, v in os.environ.items()
            if not k.upper().endswith(("_API_KEY", "_TOKEN", "_SECRET")) and k.upper() not in ("HERMES_PROFILE",)}
@@ -204,9 +215,27 @@ def _child_env(scratch: Path, opts: PlayOptions) -> dict[str, str]:
     return env
 
 
+def _plugin_name(path: Path) -> str:
+    from .util import read_yaml
+    meta = read_yaml(path / "plugin.yaml")
+    return str(meta.get("name") or path.name)
+
+
+def _link(src: Path, dst: Path) -> None:
+    if dst.exists():
+        return
+    try:
+        dst.symlink_to(src, target_is_directory=True)
+    except OSError:  # Windows without symlink rights
+        shutil.copytree(src, dst, ignore=shutil.ignore_patterns(".git", "__pycache__", "*.pyc"))
+
+
 def _install_into(scratch: Path, opts: PlayOptions, env: dict[str, str]) -> None:
     plugins = scratch / "plugins"
     plugins.mkdir(parents=True, exist_ok=True)
+    for extra in opts.extra_plugins:
+        src = Path(extra).resolve()
+        _link(src, plugins / _plugin_name(src))
     target = plugins / "ariadne"
     if not target.exists():
         try:
@@ -238,7 +267,13 @@ def play(cassette_path: str | Path, opts: PlayOptions | None = None) -> PlayResu
     provider = opts.provider or "custom"
     if opts.clone_home:
         clone_context(Path(opts.clone_home), scratch)
-    (scratch / "config.yaml").write_text(_scratch_config(tape, port, provider, scratch / "config.yaml"), encoding="utf-8")
+    cfg_text = _scratch_config(tape, port, provider, scratch / "config.yaml")
+    if opts.extra_plugins:
+        cfg = json.loads(cfg_text) if cfg_text.lstrip().startswith("{") else _read_yaml_text(cfg_text)
+        names = [_plugin_name(Path(p).resolve()) for p in opts.extra_plugins]
+        cfg.setdefault("plugins", {})["enabled"] = sorted(set(cfg["plugins"].get("enabled") or []) | set(names) | {"ariadne"})
+        cfg_text = json.dumps(cfg, indent=2, default=str)
+    (scratch / "config.yaml").write_text(cfg_text, encoding="utf-8")
     env = _child_env(scratch, opts)
     surface = opts.surface or tape.header.get("platform") or "tui"
     if surface == "desktop":

@@ -1,0 +1,49 @@
+name: Ariadne replay
+description: Replay recorded Hermes sessions offline (no model, no network, no tokens) and fail on drift or broken hook contracts.
+branding:
+  icon: rewind
+  color: purple
+inputs:
+  cassettes:
+    description: Glob of cassette files to replay
+    default: tests/cassettes/*.cassette.jsonl
+  plugin-path:
+    description: Plugin directory to load next to Ariadne (the plugin under test). Empty to load none.
+    default: "."
+  hermes-ref:
+    description: Hermes git ref (tag, branch or commit) to replay against
+    default: v0.23.0
+  hermes-extras:
+    description: Hermes extras to install (comma-separated), e.g. anthropic for Anthropic-format cassettes
+    default: anthropic
+  python-version:
+    description: Python for Hermes
+    default: "3.14"
+  fail-on:
+    description: "drift (default): any difference or contract violation fails; contract: only contract violations; never"
+    default: drift
+runs:
+  using: composite
+  steps:
+    - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2  # v10.3.3
+      with:
+        hermes-extras:
+    description: Hermes extras to install (comma-separated), e.g. anthropic for Anthropic-format cassettes
+    default: anthropic
+  python-version: ${{ inputs.python-version }}
+    - name: Install Hermes ${{ inputs.hermes-ref }}
+      shell: bash
+      run: |
+        git clone --quiet --depth 1 --branch "${{ inputs.hermes-ref }}" https://github.com/NousResearch/hermes-agent.git "$RUNNER_TEMP/hermes-agent" \
+          || { git clone --quiet https://github.com/NousResearch/hermes-agent.git "$RUNNER_TEMP/hermes-agent" && git -C "$RUNNER_TEMP/hermes-agent" checkout --quiet "${{ inputs.hermes-ref }}"; }
+        uv venv --quiet "$RUNNER_TEMP/hermes-venv" --python "${{ inputs.python-version }}"
+        EXTRAS="${{ inputs.hermes-extras }}"
+        VIRTUAL_ENV="$RUNNER_TEMP/hermes-venv" uv pip install --quiet -e "$RUNNER_TEMP/hermes-agent${EXTRAS:+[$EXTRAS]}"
+    - name: Replay cassettes
+      shell: bash
+      run: |
+        PLUGIN_ARGS=()
+        if [ -n "${{ inputs.plugin-path }}" ]; then PLUGIN_ARGS=(--plugin "${{ inputs.plugin-path }}"); fi
+        python3 "${{ github.action_path }}/ci/run_cassettes.py" \
+          --hermes-python "$RUNNER_TEMP/hermes-venv/bin/python" \
+          --glob "${{ inputs.cassettes }}" --fail-on "${{ inputs.fail-on }}" "${PLUGIN_ARGS[@]}"

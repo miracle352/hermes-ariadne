@@ -1,0 +1,37 @@
+name: ci
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2  # v10.3.3
+        with:
+          python-version: "3.14"
+      - run: uv run --with pytest --with pydantic python -m pytest -q -c tests/pytest.ini --rootdir tests tests/unit
+
+  replay:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - hermes-ref: v0.23.0   # the cassettes were recorded here: every request must match
+            fail-on: drift
+          - hermes-ref: main      # main has intended changes; hook contracts must still hold
+            fail-on: contract
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: ./
+        with:
+          cassettes: tests/cassettes/*.cassette.jsonl
+          plugin-path: ""
+          hermes-ref: ${{ matrix.hermes-ref }}
+          fail-on: ${{ matrix.fail-on }}
