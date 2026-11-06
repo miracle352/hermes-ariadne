@@ -1,0 +1,23 @@
+name: ariadne
+version: 0.1.0
+manifest_version: 2
+api_version: 1
+description: Record any Hermes session and replay it offline with no model, no network and no tokens, to find what changed between Hermes versions.
+author: miracle352
+license: MIT
+homepage: https://github.com/miracle352/hermes-ariadne
+requires_hermes: ">=0.23.0"
+tags: [testing, replay, regression, debugging, ci]
+provides_tools: []
+provides_hooks:
+  - pre_llm_call
+  - post_auxiliary_call
+  - post_compaction
+  - subagent_start
+  - pre_approval_request
+  - post_approval_response
+config_schema:
+  record:
+    type: bool
+    default: false
+    description: Record every new session to a local cassette (off by default; `hermes ariadne record on` also works).

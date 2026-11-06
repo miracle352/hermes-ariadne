@@ -1,0 +1,96 @@
+"""Loopback stand-in for the model endpoint during a replay.
+
+The replayed Hermes points its provider at this server. Main-loop calls never
+reach it (Ariadne's middleware answers them from the cassette); if one does,
+that is a *leak* and is reported. Auxiliary calls (titles, compression, ...)
+are not routed through middleware in Hermes, so they land here and get the
+recorded auxiliary text back in order, which keeps replays offline end to end.
+"""
+
+from __future__ import annotations
+
+import json
+import threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from typing import Any, Callable
+
+
+class Stub:
+    def __init__(self, aux_texts: list[str], on_event: Callable[[str, dict[str, Any]], None], model: str = "ariadne-replay"):
+        self.aux = list(aux_texts)
+        self.on_event = on_event
+        self.model = model
+        self.lock = threading.Lock()
+        self.server: ThreadingHTTPServer | None = None
+
+    def _next_aux(self) -> str:
+        with self.lock:
+            return self.aux.pop(0) if self.aux else "Replayed session"
+
+    def start(self) -> int:
+        stub = self
+
+        class Handler(BaseHTTPRequestHandler):
+            def log_message(self, *a: Any) -> None:
+                pass
+
+            def _send(self, code: int, body: Any, ctype: str = "application/json") -> None:
+                data = body if isinstance(body, bytes) else json.dumps(body).encode()
+                self.send_response(code)
+                self.send_header("Content-Type", ctype)
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+
+            def do_GET(self) -> None:
+                if self.path.rstrip("/").endswith("/models"):
+                    self._send(200, {"object": "list", "data": [{"id": stub.model, "object": "model"}]})
+                else:
+                    self._send(404, {"error": "ariadne stub: not found"})
+
+            def do_POST(self) -> None:
+                length = int(self.headers.get("Content-Length") or 0)
+                try:
+                    body = json.loads(self.rfile.read(length) or b"{}")
+                except ValueError:
+                    body = {}
+                path = self.path.rstrip("/")
+                if not (path.endswith("/chat/completions") or path.endswith("/messages") or path.endswith("/responses")):
+                    self._send(200, {})
+                    return
+                if body.get("tools"):
+                    stub.on_event("leak", {"path": path, "note": "a main-loop model call reached the network stand-in"})
+                    self._send(503, {"error": {"message": "ariadne replay: model calls are served from the cassette"}})
+                    return
+                text = stub._next_aux()
+                stub.on_event("aux_served", {"path": path})
+                usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+                if path.endswith("/messages"):
+                    msg = {"id": "ariadne-aux", "type": "message", "role": "assistant", "model": stub.model,
+                           "content": [{"type": "text", "text": text}], "stop_reason": "end_turn",
+                           "usage": {"input_tokens": 0, "output_tokens": 0}}
+                    self._send(200, msg)
+                    return
+                chunk_base = {"id": "ariadne-aux", "created": 0, "model": stub.model}
+                message = {"role": "assistant", "content": text}
+                if not body.get("stream"):
+                    self._send(200, {**chunk_base, "object": "chat.completion",
+                                     "choices": [{"index": 0, "message": message, "finish_reason": "stop"}], "usage": usage})
+                    return
+                self.send_response(200)
+                self.send_header("Content-Type", "text/event-stream")
+                self.end_headers()
+                for chunk in ({"choices": [{"index": 0, "delta": message, "finish_reason": None}]},
+                              {"choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}], "usage": usage}):
+                    self.wfile.write(b"data: " + json.dumps({**chunk_base, "object": "chat.completion.chunk", **chunk}).encode() + b"\n\n")
+                self.wfile.write(b"data: [DONE]\n\n")
+                self.wfile.flush()
+
+        self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+        return self.server.server_address[1]
+
+    def stop(self) -> None:
+        if self.server is not None:
+            self.server.shutdown()
+            self.server.server_close()
