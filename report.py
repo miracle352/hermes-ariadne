@@ -28,6 +28,15 @@ def render(result: Any, max_diffs: int = 12) -> str:
     if sub:
         lines.append(f"provider  replayed on a local stand-in for {sub.get('recorded')!r}; its request extras are compared apart "
                      f"({c('provider_standin_diff')} calls differ there, not counted as drift)")
+    envs = [e for e in ev if e.get("type") == "environment_diff"]
+    if envs:
+        first = envs[0]
+        bits = []
+        if first.get("skills_added") or first.get("skills_removed"):
+            bits.append(f"skills changed since recording (+{len(first.get('skills_added') or [])} / -{len(first.get('skills_removed') or [])})")
+        if first.get("lines"):
+            bits.append("machine lines differ: " + "; ".join(sorted({l.split(':')[0] for l in (first['lines'].get('live') or []) + (first['lines'].get('recorded') or [])})))
+        lines.append(f"machine   {', '.join(bits)} — environment, not counted as drift")
     shown = 0
     for e in ev:
         t = e.get("type")

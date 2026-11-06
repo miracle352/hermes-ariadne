@@ -326,6 +326,14 @@ class Replayer:
             self.emit("llm_match", n=n, seq=ev.get("seq"))
         else:
             soft = set(self.control.get("soft_sections") or [])
+            substituted = bool(self.control.get("provider_substituted"))
+            rec_core, rec_env = normalize.split_environment(recorded.get("system") or [], substituted)
+            live_core, live_env = normalize.split_environment(live.get("system") or [], substituted)
+            env_delta = normalize.environment_delta(rec_env, live_env)
+            if env_delta:
+                self.emit("environment_diff", n=n, **env_delta)
+            recorded = {**recorded, "system": rec_core}
+            live = {**live, "system": live_core}
             diffs = normalize.diff(recorded, live)
             if self.control.get("provider_substituted"):
                 # Provider-specific reasoning carriers ride on assistant messages; a stand-in

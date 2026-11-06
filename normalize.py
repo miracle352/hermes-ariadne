@@ -193,3 +193,47 @@ def diff(recorded: Any, live: Any, path: str = "", limit: int = 40) -> list[dict
 
 def section_of(path: str) -> str:
     return path.lstrip(".").split(".")[0].split("[")[0] or "request"
+
+
+# ---------------------------------------------------------------- environment split
+# Parts of the system prompt that describe the machine or the install rather than how Hermes
+# builds a request. They are compared separately and reported as environment, never as drift.
+_SKILLS_BLOCK = re.compile(r"<available_skills>[\s\S]*?</available_skills>")
+_ENV_LINES = [
+    re.compile(r"^Python toolchain:.*$", re.M),
+    re.compile(r"^Node toolchain:.*$", re.M),
+    re.compile(r"^OS:.*$", re.M),
+    re.compile(r"^Conversation started:.*$", re.M),   # the date: a replay on another day must still match
+    re.compile(r"^Host:.*$", re.M),
+]
+_PROVIDER_LINE = re.compile(r"^Provider: .*$", re.M)
+
+
+def split_environment(system: list[Any], provider_substituted: bool = False) -> tuple[list[Any], dict[str, Any]]:
+    core: list[Any] = []
+    env: dict[str, Any] = {"skills": [], "lines": []}
+    for part in system or []:
+        if not isinstance(part, str):
+            core.append(part)
+            continue
+        for block in _SKILLS_BLOCK.findall(part):
+            env["skills"].extend(sorted(line.strip() for line in block.splitlines()
+                                        if line.strip().startswith("- ")))
+        text = _SKILLS_BLOCK.sub("<available_skills/>", part)
+        for pattern in _ENV_LINES + ([_PROVIDER_LINE] if provider_substituted else []):
+            env["lines"].extend(pattern.findall(text))
+            text = pattern.sub("<environment/>", text)
+        core.append(text)
+    return core, env
+
+
+def environment_delta(rec_env: dict[str, Any], live_env: dict[str, Any]) -> dict[str, Any]:
+    out: dict[str, Any] = {}
+    rs, ls = set(rec_env.get("skills") or []), set(live_env.get("skills") or [])
+    if rs != ls:
+        out["skills_added"] = sorted(ls - rs)
+        out["skills_removed"] = sorted(rs - ls)
+    rl, ll = rec_env.get("lines") or [], live_env.get("lines") or []
+    if rl != ll:
+        out["lines"] = {"recorded": rl, "live": ll}
+    return out
