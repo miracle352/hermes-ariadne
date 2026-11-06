@@ -319,12 +319,21 @@ class Replayer:
                       note="Hermes asked the model for more than the cassette holds")
             return synthetic_response(kw.get("api_mode") or "", "[ariadne] cassette exhausted: this call did not happen in the recording.")
         ev = self.llm[index]
-        recorded = ev.get("request") or {}
+        # Re-mask the recorded side too: masks are idempotent, and a cassette written by an older
+        # recorder may predate a mask.
+        recorded = self.masker.tree(ev.get("request") or {})
         if normalize.digest(live) == ev.get("request_digest") or live == recorded:
             self.emit("llm_match", n=n, seq=ev.get("seq"))
         else:
             soft = set(self.control.get("soft_sections") or [])
             diffs = normalize.diff(recorded, live)
+            if self.control.get("provider_substituted"):
+                # Provider-specific reasoning carriers ride on assistant messages; a stand-in
+                # provider legitimately drops or reshapes them.
+                carriers = [d for d in diffs if _is_carrier_path(d["path"])]
+                if carriers:
+                    diffs = [d for d in diffs if not _is_carrier_path(d["path"])]
+                    self.emit("provider_standin_diff", n=n, diffs=carriers, provider=self.control.get("provider_substituted"))
             hard = [d for d in diffs if normalize.section_of(d["path"]) not in soft]
             softd = [d for d in diffs if normalize.section_of(d["path"]) in soft]
             if hard:
@@ -377,6 +386,17 @@ class Replayer:
     def finish(self) -> None:
         self.emit("finish", llm_served=min(self.llm_pos, len(self.llm)), llm_total=len(self.llm),
                   tools_served=len(self.used_tool_ids), tools_total=len(self.tools_in_order))
+
+
+_CARRIER_KEYS = ("reasoning_details", "reasoning_content", "reasoning", "extra_content", "thought_signature",
+                 "encrypted_content", "signature", "thinking", "redacted_thinking")
+
+
+def _is_carrier_path(path: str) -> bool:
+    if not path.startswith(".messages"):
+        return False
+    tail = path.replace("[", ".").replace("]", "").split(".")
+    return any(k in tail for k in _CARRIER_KEYS)
 
 
 def synthetic_response(api_mode: str, text: str) -> Any:
