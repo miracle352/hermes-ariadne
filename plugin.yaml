@@ -26,6 +26,10 @@ provides_hooks:
   - post_compaction
   - pre_approval_request
   - post_approval_response
+provides_middleware:
+  - llm_execution
+  - tool_request
+  - tool_execution
 config_schema:
   record:
     type: bool
