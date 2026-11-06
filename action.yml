@@ -14,7 +14,7 @@ inputs:
     description: Hermes git ref (tag, branch or commit) to replay against
     default: v0.23.0
   hermes-extras:
-    description: Hermes extras to install (comma-separated), e.g. anthropic for Anthropic-format cassettes
+    description: Hermes extras to install, comma-separated (anthropic is needed for Anthropic-format cassettes)
     default: anthropic
   python-version:
     description: Python for Hermes
@@ -27,17 +27,14 @@ runs:
   steps:
     - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2  # v10.3.3
       with:
-        hermes-extras:
-    description: Hermes extras to install (comma-separated), e.g. anthropic for Anthropic-format cassettes
-    default: anthropic
-  python-version: ${{ inputs.python-version }}
+        python-version: ${{ inputs.python-version }}
     - name: Install Hermes ${{ inputs.hermes-ref }}
       shell: bash
       run: |
         git clone --quiet --depth 1 --branch "${{ inputs.hermes-ref }}" https://github.com/NousResearch/hermes-agent.git "$RUNNER_TEMP/hermes-agent" \
           || { git clone --quiet https://github.com/NousResearch/hermes-agent.git "$RUNNER_TEMP/hermes-agent" && git -C "$RUNNER_TEMP/hermes-agent" checkout --quiet "${{ inputs.hermes-ref }}"; }
-        uv venv --quiet "$RUNNER_TEMP/hermes-venv" --python "${{ inputs.python-version }}"
         EXTRAS="${{ inputs.hermes-extras }}"
+        uv venv --quiet "$RUNNER_TEMP/hermes-venv" --python "${{ inputs.python-version }}"
         VIRTUAL_ENV="$RUNNER_TEMP/hermes-venv" uv pip install --quiet -e "$RUNNER_TEMP/hermes-agent${EXTRAS:+[$EXTRAS]}"
     - name: Replay cassettes
       shell: bash
