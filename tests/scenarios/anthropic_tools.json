@@ -1,0 +1,44 @@
+{
+ "name": "anthropic_tools",
+ "config": {
+  "model": {
+   "api_mode": "anthropic_messages"
+  }
+ },
+ "turns": [
+  "create b.txt with 'beta' and read it back"
+ ],
+ "script": [
+  {
+   "thinking": "I should write then read.",
+   "tool_calls": [
+    {
+     "name": "write_file",
+     "arguments": {
+      "path": "{P}/b.txt",
+      "content": "beta\n"
+     }
+    }
+   ]
+  },
+  {
+   "tool_calls": [
+    {
+     "name": "read_file",
+     "arguments": {
+      "path": "{P}/b.txt"
+     }
+    },
+    {
+     "name": "terminal",
+     "arguments": {
+      "command": "echo done"
+     }
+    }
+   ]
+  },
+  {
+   "text": "b.txt says beta."
+  }
+ ]
+}

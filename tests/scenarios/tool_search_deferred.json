@@ -1,0 +1,34 @@
+{
+ "name": "tool_search_deferred",
+ "turns": [
+  "list my scheduled jobs"
+ ],
+ "script": [
+  {
+   "tool_calls": [
+    {
+     "name": "tool_search",
+     "arguments": {
+      "query": "cron jobs schedule"
+     }
+    }
+   ]
+  },
+  {
+   "tool_calls": [
+    {
+     "name": "tool_call",
+     "arguments": {
+      "name": "cronjob_manage",
+      "arguments": {
+       "action": "list"
+      }
+     }
+    }
+   ]
+  },
+  {
+   "text": "You have no scheduled jobs."
+  }
+ ]
+}

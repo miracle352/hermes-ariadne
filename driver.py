@@ -172,6 +172,11 @@ def _scratch_config(tape: cas.Cassette, stub_port: int, provider: str | None = N
     cfg["model"] = {**{k: v for k, v in recorded_model.items() if k not in ("provider", "base_url", "api_key", "api_mode", "default", "model")},
                     "provider": provider, "model": model, "base_url": f"http://127.0.0.1:{stub_port}/v1",
                     "api_key": "ariadne-replay-offline"}
+    # The stand-in must speak the wire format the recording used (chat_completions,
+    # anthropic_messages, ...): Hermes builds requests and reads responses per format.
+    api_mode = next((e.get("api_mode") for e in tape.of("llm") if e.get("api_mode")), None) or h.get("api_mode")
+    if api_mode and api_mode != "chat_completions":
+        cfg["model"]["api_mode"] = api_mode
     plugins = cfg.get("plugins") if isinstance(cfg.get("plugins"), dict) else {}
     enabled = [p for p in (plugins.get("enabled") or []) if isinstance(p, str)]
     cfg["plugins"] = {**plugins, "enabled": sorted(set(enabled) | {"ariadne"}), "disabled": []}

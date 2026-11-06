@@ -1,0 +1,22 @@
+{
+ "name": "anthropic_multiturn_thinking",
+ "config": {
+  "model": {
+   "api_mode": "anthropic_messages"
+  }
+ },
+ "turns": [
+  "think about 2+2",
+  "now 3+3"
+ ],
+ "script": [
+  {
+   "thinking": "2+2 is 4.",
+   "text": "4"
+  },
+  {
+   "thinking": "3+3 is 6.",
+   "text": "6"
+  }
+ ]
+}

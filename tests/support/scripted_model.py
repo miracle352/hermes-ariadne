@@ -31,7 +31,8 @@ class ScriptedModel:
             self.calls += 1
             with open(self.log_dir / "requests.jsonl", "a", encoding="utf-8") as fh:
                 fh.write(json.dumps({"path": path, "body": request}, sort_keys=True) + "\n")
-            if not path.rstrip("/").endswith("/chat/completions"):
+            p = path.rstrip("/")
+            if not (p.endswith("/chat/completions") or p.endswith("/messages")):
                 return None
             if not request.get("tools"):
                 return {"text": "Scripted auxiliary reply"}
@@ -92,6 +93,9 @@ def make_handler(model: ScriptedModel):
                 self._json(200, {})
                 return
             n = model.calls
+            if self.path.rstrip("/").endswith("/messages"):
+                self._anthropic(reply, n, request)
+                return
             msg = _message(reply, n)
             finish = reply.get("finish_reason") or ("tool_calls" if msg.get("tool_calls") else "stop")
             usage = {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}
@@ -121,6 +125,51 @@ def make_handler(model: ScriptedModel):
             send({"choices": [{"index": 0, "delta": {}, "finish_reason": finish}], "usage": usage})
             self.wfile.write(b"data: [DONE]\n\n")
             self.wfile.flush()
+
+        def _anthropic(self, reply: dict, n: int, request: dict) -> None:
+            """Anthropic Messages API: content blocks, tool_use, optional thinking; JSON or SSE."""
+            blocks: list[dict] = []
+            if reply.get("thinking"):
+                blocks.append({"type": "thinking", "thinking": reply["thinking"], "signature": f"sig_{n}"})
+            if reply.get("text"):
+                blocks.append({"type": "text", "text": reply["text"]})
+            for i, tc in enumerate(reply.get("tool_calls") or []):
+                args = tc.get("arguments", {})
+                blocks.append({"type": "tool_use", "id": f"toolu_{n}_{i}", "name": tc["name"],
+                               "input": json.loads(args) if isinstance(args, str) else args})
+            stop = reply.get("stop_reason") or ("tool_use" if reply.get("tool_calls") else "end_turn")
+            usage = {"input_tokens": 10, "output_tokens": 5}
+            msg = {"id": f"msg_{n}", "type": "message", "role": "assistant", "model": request.get("model", "scripted"),
+                   "content": blocks, "stop_reason": stop, "stop_sequence": None, "usage": usage}
+            if not request.get("stream"):
+                self._json(200, msg)
+                return
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.end_headers()
+
+            def ev(name: str, data: dict) -> None:
+                self.wfile.write(f"event: {name}\ndata: {json.dumps({'type': name, **data})}\n\n".encode())
+                self.wfile.flush()
+
+            ev("message_start", {"message": {**msg, "content": [], "stop_reason": None, "usage": {"input_tokens": 10, "output_tokens": 0}}})
+            for i, b in enumerate(blocks):
+                if b["type"] == "text":
+                    ev("content_block_start", {"index": i, "content_block": {"type": "text", "text": ""}})
+                    ev("content_block_delta", {"index": i, "delta": {"type": "text_delta", "text": b["text"]}})
+                elif b["type"] == "thinking":
+                    ev("content_block_start", {"index": i, "content_block": {"type": "thinking", "thinking": "", "signature": ""}})
+                    ev("content_block_delta", {"index": i, "delta": {"type": "thinking_delta", "thinking": b["thinking"]}})
+                    ev("content_block_delta", {"index": i, "delta": {"type": "signature_delta", "signature": b["signature"]}})
+                else:
+                    ev("content_block_start", {"index": i, "content_block": {"type": "tool_use", "id": b["id"], "name": b["name"], "input": {}}})
+                    raw = json.dumps(b["input"])
+                    half = len(raw) // 2  # arguments arrive in two pieces, like a real stream
+                    ev("content_block_delta", {"index": i, "delta": {"type": "input_json_delta", "partial_json": raw[:half]}})
+                    ev("content_block_delta", {"index": i, "delta": {"type": "input_json_delta", "partial_json": raw[half:]}})
+                ev("content_block_stop", {"index": i})
+            ev("message_delta", {"delta": {"stop_reason": stop, "stop_sequence": None}, "usage": {"output_tokens": 5}})
+            ev("message_stop", {})
 
     return Handler
 
