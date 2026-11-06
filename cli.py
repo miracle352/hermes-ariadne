@@ -42,6 +42,15 @@ def setup_argparse(parser: argparse.ArgumentParser) -> None:
     cmp.add_argument("--json", action="store_true")
     cmp.add_argument("--timeout", type=float, default=300.0)
 
+    bis = subs.add_parser("bisect", help="Find the Hermes commit that changed how a cassette replays")
+    bis.add_argument("cassette", help="Cassette id, prefix, path, or `latest`")
+    bis.add_argument("--repo", required=True, help="Hermes source checkout (installed editable into --python)")
+    bis.add_argument("--python", required=True, help="Python interpreter whose Hermes is the editable --repo install")
+    bis.add_argument("--good", required=True, help="Commit/tag that replays as expected")
+    bis.add_argument("--bad", default="HEAD", help="Commit/tag that replays differently (default HEAD)")
+    bis.add_argument("--json", action="store_true")
+    bis.add_argument("--timeout", type=float, default=300.0)
+
     parser.set_defaults(func=handle)
 
 
@@ -85,6 +94,8 @@ def handle(args: argparse.Namespace) -> int:
         return _cmd_play(args)
     if cmd == "compare":
         return _cmd_compare(args)
+    if cmd == "bisect":
+        return _cmd_bisect(args)
     print("usage: hermes ariadne {record,list,show,play} ...")
     return 2
 
@@ -160,3 +171,17 @@ def _cmd_compare(args: argparse.Namespace) -> int:
                         opts=driver.PlayOptions(turn_timeout=args.timeout, clone_home=runtime.hermes_home()))
     print(json.dumps(c.to_json(), indent=2, ensure_ascii=False) if args.json else compare.render(c))
     return 0 if c.verdict == "same" else 1
+
+
+def _cmd_bisect(args: argparse.Namespace) -> int:
+    from . import bisector as bisect, driver
+    path = resolve(args.cassette)
+    try:
+        r = bisect.bisect(path, args.repo, args.python, args.good, args.bad,
+                          opts=driver.PlayOptions(turn_timeout=args.timeout, clone_home=runtime.hermes_home()),
+                          log=(lambda _m: None) if args.json else print)
+    except bisect.BisectError as exc:
+        print(f"ariadne bisect: {exc}")
+        return 2
+    print(json.dumps(r.to_json(), indent=2, ensure_ascii=False) if args.json else bisect.render(r))
+    return 0 if r.first_bad is None else 1
