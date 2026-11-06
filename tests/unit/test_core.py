@@ -93,3 +93,19 @@ def test_secret_key_filter_keeps_token_settings():
     assert "api_key" not in out and "password" not in out
     assert out["providers"]["a"] == {"base_url": "u"}
     assert out["auth"] == {"mode": "oauth"}
+
+
+def test_contract_checker_flags_unpaired_api_request():
+    contracts = importlib.import_module(f"{pkg}.contracts")
+    seen = []
+    c = contracts.ContractChecker(lambda t, d: seen.append((t, d)), mode=lambda: "replay")
+    base = {"telemetry_schema_version": "hermes.observer.v1", "turn_id": "T"}
+    c.hook("pre_llm_call")(**base)
+    c.hook("pre_api_request")(**base, api_request_id="T:api:1")
+    c.hook("pre_api_request")(**base, api_request_id="T:api:2")
+    c.hook("post_api_request")(**base, api_request_id="T:api:2")
+    c.hook("post_tool_call")(**base, tool_call_id="x")  # dispatcher rule: ignored in replay
+    c.hook("post_llm_call")(**base)
+    c.hook("on_session_end")(**base, completed=True)
+    rules = [d["rule"] for t, d in seen if t == "contract_violation"]
+    assert rules == ["api_pairs"]

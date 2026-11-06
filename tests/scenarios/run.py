@@ -85,7 +85,15 @@ def main() -> int:
         print(f"    cassette: {dict((k, kinds.count(k)) for k in sorted(set(kinds)))}")
         res = driver.play(tape, driver.PlayOptions(hermes_python=python_a, turn_timeout=120, keep=False))  # config from the cassette snapshot
         det = res.verdict
-        print(f"    replay on A: {det}")
+        cv = [e for e in res.events if e.get("type") == "contract_violation"]
+        cc = next((e for e in res.events if e.get("type") == "contracts_checked"), None)
+        print(f"    replay on A: {det}   contracts: {len(cv)} violation(s){'' if cc else ' (finish not observed)'}")
+        for e in cv[:6]:
+            print("       !", e.get("rule"), {k: v for k, v in e.items() if k not in ("type", "t", "promise", "rule")})
+        rec_cv = (tape.parent.parent / "contracts.jsonl")
+        if rec_cv.is_file():
+            for line in rec_cv.read_text().splitlines()[:6]:
+                print("       ! (during recording)", line[:300])
         if det != "identical":
             for e in res.events:
                 if e.get("type") in ("llm_drift", "tool_drift", "off_script_tool", "extra_llm_call", "missing_llm_calls", "leak"):

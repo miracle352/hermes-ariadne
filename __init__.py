@@ -117,7 +117,42 @@ def _subagent_start(**kw: Any) -> None:
     return None
 
 
+def _contract_emit(type_: str, data: dict[str, Any]) -> None:
+    control = _mode()
+    if _replaying(control):
+        rp = _active_replayer(control)
+        if rp is not None:
+            rp.emit(type_, **data)
+        return
+    if control.get("mode") == "record" and type_ == "contract_violation":
+        import json as _json
+        import time as _time
+        with open(runtime.data_dir() / "contracts.jsonl", "a", encoding="utf-8") as fh:
+            fh.write(_json.dumps({"t": round(_time.time(), 3), **data}, default=str) + "\n")
+
+
+_checker = None
+
+
+def _contract_hook(name: str):
+    def cb(**kw: Any) -> None:
+        if _mode().get("mode") in ("record", "replay", "fork") and _checker is not None:
+            _checker.hook(name)(**kw)
+        return None
+    cb.__name__ = f"ariadne_contract_{name}"
+    return cb
+
+
+def _contracts_finish(**kw: Any) -> None:
+    if _mode().get("mode") in ("record", "replay", "fork") and _checker is not None:
+        _checker.finish()
+    return None
+
+
 def register(ctx: Any) -> None:
+    global _checker
+    from . import contracts
+    _checker = contracts.ContractChecker(_contract_emit, mode=lambda: str(_mode().get("mode")))
     try:
         runtime.CONTROL.setting_record = bool(ctx.get_config("record", default=False))
     except Exception:
@@ -133,6 +168,11 @@ def register(ctx: Any) -> None:
     ctx.register_hook("subagent_start", _subagent_start)
     ctx.register_hook("pre_approval_request", _approval("request"))
     ctx.register_hook("post_approval_response", _approval("response"))
+
+    # Hook-contract checks (observation only; every callback returns None).
+    for hook_name in contracts.HOOKS:
+        ctx.register_hook(hook_name, _contract_hook(hook_name))
+    ctx.register_hook("on_session_finalize", _contracts_finish)
 
     from . import cli
     ctx.register_cli_command(

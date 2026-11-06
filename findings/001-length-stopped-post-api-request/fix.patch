@@ -1,0 +1,62 @@
+From 68efe1327c3f459412faa03742f3a6f55fb35eb0 Mon Sep 17 00:00:00 2001
+From: miracle352 <miracle352@users.noreply.github.com>
+Date: Fri, 6 Nov 2026 22:45:23 +0100
+Subject: [PATCH] fix(agent): fire post_api_request for length-stopped attempts
+
+A response that stops on finish_reason=length takes the truncation-recovery
+branch in check_api_response before normalize_model_response, which is where
+post_api_request fires. The attempt is a completed provider call, so an
+observer that opened a span on pre_api_request never saw it close.
+
+Found with Ariadne (hook-contract check: every pre_api_request ends with
+post_api_request or api_request_error).
+---
+ agent/turn_response_check.py | 25 +++++++++++++++++++++++++
+ 1 file changed, 25 insertions(+)
+
+diff --git a/agent/turn_response_check.py b/agent/turn_response_check.py
+index 38380728..92010680 100644
+--- a/agent/turn_response_check.py
++++ b/agent/turn_response_check.py
+@@ -89,6 +89,23 @@ def _derive_finish_reason(agent: Any, response: Any, messages: Any) -> str:
+     return finish_reason
+ 
+ 
++def _fire_post_api_request_for_truncated(
++    agent: Any, response: Any, finish_reason: Any, *, api_messages: Any, api_call_count: Any,
++    api_duration: Any, api_start_time: Any, api_request_id: Any, effective_task_id: Any, turn_id: Any,
++) -> None:
++    """Fire ``post_api_request`` for a length-stopped attempt (best-effort, like every observer)."""
++    try:
++        from agent.turn_response_intake import _fire_post_api_request_hook, normalize_response_for_agent
++        assistant_message = normalize_response_for_agent(agent, response)
++        _fire_post_api_request_hook(
++            agent, response, assistant_message, finish_reason, api_messages=api_messages,
++            api_call_count=api_call_count, api_duration=api_duration, api_start_time=api_start_time,
++            api_request_id=api_request_id, effective_task_id=effective_task_id, turn_id=turn_id,
++        )
++    except Exception:
++        logging.debug("post_api_request for a length-stopped attempt failed", exc_info=True)
++
++
+ def check_api_response(
+     agent: Any, *, response: Any, _retry: Any, thinking_spinner: Any, messages: Any,
+     api_messages: Any, api_kwargs: Any, active_system_prompt: Any, conversation_history: Any,
+@@ -171,6 +188,14 @@ def check_api_response(
+         return _verdict("break")
+ 
+     if finish_reason == "length":
++        # A length-stopped attempt is a completed provider call: observers that opened a span on
++        # pre_api_request must see it close before truncation recovery continues or ends the turn
++        # (otherwise every cut-off reply leaves an unpaired pre_api_request).
++        _fire_post_api_request_for_truncated(
++            agent, response, finish_reason, api_messages=api_messages, api_call_count=api_call_count,
++            api_duration=api_duration, api_start_time=api_start_time, api_request_id=api_request_id,
++            effective_task_id=effective_task_id, turn_id=turn_id,
++        )
+         _tv = recover_from_truncation(
+             agent, response, finish_reason, _retry, messages=messages,
+             conversation_history=conversation_history, api_kwargs=api_kwargs,
+-- 
+2.43.0
+

@@ -1,0 +1,15 @@
+{
+ "name": "truncated_length",
+ "turns": [
+  "write a long answer"
+ ],
+ "script": [
+  {
+   "text": "This answer is cut off mid",
+   "finish_reason": "length"
+  },
+  {
+   "text": " sentence and continues here."
+  }
+ ]
+}

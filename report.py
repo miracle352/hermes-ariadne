@@ -28,6 +28,13 @@ def render(result: Any, max_diffs: int = 12) -> str:
     if sub:
         lines.append(f"provider  replayed on a local stand-in for {sub.get('recorded')!r}; its request extras are compared apart "
                      f"({c('provider_standin_diff')} calls differ there, not counted as drift)")
+    cv = [e for e in ev if e.get("type") == "contract_violation"]
+    cc = next((e for e in ev if e.get("type") == "contracts_checked"), None)
+    if cv or cc:
+        lines.append(f"contracts {len(cv)} hook-contract violation(s)" + (f" across {cc.get('turns')} turns" if cc else ""))
+        for e in cv[:8]:
+            ids = {k: v for k, v in e.items() if k not in ("type", "t", "rule", "promise")}
+            lines.append(f"  ! {e.get('rule')}: {e.get('promise')}  {ids}")
     envs = [e for e in ev if e.get("type") == "environment_diff"]
     if envs:
         first = envs[0]
