@@ -46,7 +46,7 @@ hermes ariadne fork latest --at-turn 2 --prompt "do it without the terminal"
 **Catch broken hook promises.** On every recording and replay Ariadne checks the promises in
 Hermes's hook docs (every `pre_api_request` gets a `post_api_request`, `pre_llm_call` once per
 turn, subagents start and stop in pairs, and so on). It found one that Hermes breaks:
-[findings/001](findings/001-length-stopped-post-api-request/) (NousResearch/hermes-agent#150324).
+[findings/001](findings/001-length-stopped-post-api-request/) (issue NousResearch/hermes-agent#150324, fix NousResearch/hermes-agent#150333).
 
 ## Training data
 
@@ -120,6 +120,22 @@ separately too.
   recordings replay through the TUI protocol and will show surface differences.
 - Chat Completions and Anthropic Messages are covered. Other wire formats are recorded and
   replayed, but untested.
+
+## In your plugin's CI
+
+Record a few sessions with your plugin enabled, commit the cassettes, and add:
+
+```yaml
+- uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+- uses: miracle352/hermes-ariadne@main
+  with:
+    cassettes: tests/cassettes/*.cassette.jsonl
+    hermes-ref: v0.23.0
+```
+
+It installs Hermes at `hermes-ref` from its lock file, loads your plugin next to Ariadne, replays
+every cassette offline and writes a table to the run summary. `fail-on: contract` fails only on
+broken hook contracts, which is useful against `main`.
 
 ## Tests
 
