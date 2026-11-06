@@ -109,3 +109,20 @@ def test_contract_checker_flags_unpaired_api_request():
     c.hook("on_session_end")(**base, completed=True)
     rules = [d["rule"] for t, d in seen if t == "contract_violation"]
     assert rules == ["api_pairs"]
+
+
+def test_trajectory_matches_tool_results_by_position():
+    export = importlib.import_module(f"{pkg}.export")
+    msgs = [{"role": "user", "content": "go"},
+            {"role": "assistant", "content": None, "tool_calls": [
+                {"id": "<uuid>", "type": "function", "function": {"name": "read_file", "arguments": '{"path": "a"}'}},
+                {"id": "<uuid>", "type": "function", "function": {"name": "terminal", "arguments": '{"command": "ls"}'}}]},
+            {"role": "tool", "tool_call_id": "<uuid>", "content": '{"content": "A"}'},
+            {"role": "tool", "tool_call_id": "<uuid>", "content": "ok"},
+            {"role": "assistant", "content": "done", "reasoning_content": "thought"}]
+    conv = export._openai_messages_to_sharegpt(msgs)
+    assert [c["from"] for c in conv] == ["human", "gpt", "tool", "gpt"]
+    assert conv[1]["value"].count("<tool_call>") == 2
+    tool = conv[2]["value"]
+    assert tool.index('"name": "read_file"') < tool.index('"name": "terminal"')
+    assert conv[3]["value"].startswith("<think>\nthought\n</think>\n") and conv[3]["value"].endswith("done")

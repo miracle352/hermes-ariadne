@@ -48,6 +48,22 @@ Hermes's hook docs (every `pre_api_request` gets a `post_api_request`, `pre_llm_
 turn, subagents start and stop in pairs, and so on). It found one that Hermes breaks:
 [findings/001](findings/001-length-stopped-post-api-request/) (NousResearch/hermes-agent#150324).
 
+## Training data
+
+`export` turns a cassette into one entry in Hermes's own trajectory format (the ShareGPT layout
+`agent/trajectory.py` writes), and a fork run into a preference pair: same prompt state, the
+recorded reply on one side and the live model's reply on the other.
+
+```
+hermes ariadne export latest --out trajectories.jsonl
+hermes ariadne export --fork <fork run dir> --prefer forked --out pairs.jsonl
+```
+
+## In chat
+
+`/ariadne on`, `/ariadne off`, `/ariadne status`, `/ariadne last`, `/ariadne play` and
+`/ariadne contracts` work in Desktop, the TUI, the CLI and messaging platforms.
+
 ## Commands
 
 | command | what it does |
@@ -59,6 +75,7 @@ turn, subagents start and stop in pairs, and so on). It found one that Hermes br
 | `compare <id> --a PY --b PY` | replay on two installs and diff them |
 | `bisect <id> --repo DIR --python PY --good REF [--bad REF]` | find the first commit that changed the replay |
 | `fork <id> --at N \| --at-turn K [--prompt TEXT] [--live-tools]` | live model from a recorded point |
+| `export <id> \| --fork DIR [--prefer forked\|original] [--out FILE]` | trajectory or preference pair |
 
 `<id>` can be a cassette id, a unique prefix, a path, or `latest`.
 

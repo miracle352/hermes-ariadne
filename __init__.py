@@ -174,6 +174,10 @@ def register(ctx: Any) -> None:
         ctx.register_hook(hook_name, _contract_hook(hook_name))
     ctx.register_hook("on_session_finalize", _contracts_finish)
 
+    from . import slash
+    ctx.register_command("ariadne", handler=slash.handle, description="Record sessions and replay them offline",
+                         args_hint="on|off|status|list|last|play|contracts")
+
     from . import cli
     ctx.register_cli_command(
         name="ariadne",

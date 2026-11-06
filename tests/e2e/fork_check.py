@@ -1,9 +1,10 @@
 """Offline check of `fork` with two scripted models.
 
 Model A records: write a.txt -> read a.txt -> answer.
-Fork at call 2 with model B as the live model: B reads a.txt (identical to the recording, so
-it must get the recorded result), then tries to delete it (new, so it must be refused without
-running), then answers differently. Call 1 must be served from the cassette byte-identically.
+Fork at call 2 with model B as the live model: B tries to delete a.txt (new, so it must be
+refused without running), then reads it (identical to the recording, so it must get the
+recorded result), then answers differently. The exported preference pair must hold B's call
+and the recorded call as its two sides. Call 1 must be served from the cassette byte-identically.
 
 Usage: python tests/e2e/fork_check.py <hermes-python>
 """
@@ -58,8 +59,8 @@ def main() -> int:
 
     target.write_text("ALTERED ON DISK\n")  # the live world differs; a frozen fork must not see it
     b = scripted_model.serve(0, [
-        {"tool_calls": [{"name": "read_file", "arguments": {"path": str(target)}}]},
         {"tool_calls": [{"name": "terminal", "arguments": {"command": f"rm {target}"}}]},
+        {"tool_calls": [{"name": "read_file", "arguments": {"path": str(target)}}]},
         {"text": "Forked answer: a.txt says alpha, and I was not allowed to delete it."},
     ], work / "log-b")
     config(b.server_address[1])
@@ -72,6 +73,12 @@ def main() -> int:
           and d["frozen_tools"] == 1 and d["refused_tools"] == 1 and target.exists()
           and target.read_text() == "ALTERED ON DISK\n")
     print("deleted file survived:", target.exists())
+    export = __import__(f"{PKG}.export", fromlist=["x"])
+    pair = export.pair(r.run_dir, prefer="forked")
+    print("pair chosen  :", pair["chosen"]["value"][:120].replace("\n", " | "))
+    print("pair rejected:", pair["rejected"]["value"][:120].replace("\n", " | "))
+    ok = (ok and pair["chosen"]["value"] != pair["rejected"]["value"] and "rm " in pair["chosen"]["value"]
+          and "read_file" in pair["rejected"]["value"] and pair["prompt"][-1]["from"] in ("tool", "human"))
     print("RESULT:", "PASS" if ok else "FAIL")
     if ok:
         shutil.rmtree(work, ignore_errors=True)

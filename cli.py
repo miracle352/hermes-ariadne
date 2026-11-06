@@ -62,6 +62,12 @@ def setup_argparse(parser: argparse.ArgumentParser) -> None:
     fk.add_argument("--json", action="store_true")
     fk.add_argument("--timeout", type=float, default=300.0)
 
+    ex = subs.add_parser("export", help="Export a cassette as a trajectory, or a fork as a preference pair")
+    ex.add_argument("cassette", nargs="?", help="Cassette id, prefix, path, or `latest` (trajectory export)")
+    ex.add_argument("--fork", help="A fork run directory (preference-pair export)")
+    ex.add_argument("--prefer", choices=["forked", "original"], default="forked", help="Which side of a pair is preferred")
+    ex.add_argument("--out", help="Append the JSON line to this file (default: print it)")
+
     parser.set_defaults(func=handle)
 
 
@@ -109,6 +115,8 @@ def handle(args: argparse.Namespace) -> int:
         return _cmd_bisect(args)
     if cmd == "fork":
         return _cmd_fork(args)
+    if cmd == "export":
+        return _cmd_export(args)
     print("usage: hermes ariadne {record,list,show,play} ...")
     return 2
 
@@ -210,3 +218,26 @@ def _cmd_fork(args: argparse.Namespace) -> int:
         return 2
     print(json.dumps(r.to_json(), indent=2, ensure_ascii=False) if args.json else fork.render(r))
     return 0 if r.prefix_identical and not r.errors else 1
+
+
+def _cmd_export(args: argparse.Namespace) -> int:
+    from . import export
+    try:
+        if args.fork:
+            entry = export.pair(args.fork, prefer=args.prefer)
+        elif args.cassette:
+            entry = export.trajectory(cas.load(resolve(args.cassette)))
+        else:
+            print("ariadne export: give a cassette, or --fork RUN_DIR")
+            return 2
+    except (ValueError, OSError, KeyError) as exc:
+        print(f"ariadne export: {exc}")
+        return 2
+    line = json.dumps(entry, ensure_ascii=False)
+    if args.out:
+        with open(args.out, "a", encoding="utf-8") as fh:
+            fh.write(line + "\n")
+        print(f"wrote 1 entry to {args.out}")
+    else:
+        print(line)
+    return 0
