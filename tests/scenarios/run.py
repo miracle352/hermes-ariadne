@@ -51,7 +51,12 @@ def record(scn: dict, python_a: str, work: Path) -> Path | None:
     (home / "config.yaml").write_text(json.dumps(cfg))
     (home / "plugin-data" / "ariadne").mkdir(parents=True)
     (home / "plugin-data" / "ariadne" / "control.json").write_text('{"mode": "record"}')
-    env = dict(os.environ, HERMES_HOME=str(home), PYTHONUNBUFFERED="1")
+    # One tool runtime for every scenario home instead of ~280 MB per home (Hermes's own dev
+    # workflow points HERMES_RUNTIME_DIR at a shared store the same way).
+    import hashlib
+    runtime = Path(tempfile.gettempdir()) / "ariadne-scenario-runtime" / hashlib.sha256(python_a.encode()).hexdigest()[:12]
+    runtime.mkdir(parents=True, exist_ok=True)
+    env = dict(os.environ, HERMES_HOME=str(home), HERMES_RUNTIME_DIR=str(runtime), PYTHONUNBUFFERED="1")
     # drain=never: after the last turn keep listening until Hermes goes quiet, so turns Hermes
     # starts by itself (async subagent results) are recorded too.
     replies, errors, _, tail = driver.drive_session(python_a, env, str(project), _fill(scn["turns"], str(project)), 120,
@@ -108,6 +113,7 @@ def main() -> int:
             if c.changes:
                 print("\n".join("      " + l for l in compare.render(c).splitlines()[3:40]))
         summary.append((scn["name"], det, cmpv))
+        shutil.rmtree(root / scn["name"], ignore_errors=True)
     print("\nscenario                 replay-on-A   A-vs-B")
     for n, d, c in summary:
         print(f"  {n:<22} {d:<13} {c}")
