@@ -82,3 +82,14 @@ def test_cassette_write_load_and_torn_tail(tmp_path):
         fh.write('{"seq": 3, "kind": "tool", "trunc')  # crash mid-write
     tape = cassette.load(p)
     assert [e["kind"] for e in tape.events] == ["turn", "llm"]
+
+
+def test_secret_key_filter_keeps_token_settings():
+    util = importlib.import_module(f"{pkg}.util")
+    cfg = {"compression": {"threshold_tokens": 12000, "max_tokens": 5}, "api_key": "x", "providers": {"a": {"token": "t", "client_secret": "s", "base_url": "u"}},
+           "password": "p", "auth": {"refresh_token": "r", "mode": "oauth"}}
+    out = util.strip_secrets(cfg)
+    assert out["compression"] == {"threshold_tokens": 12000, "max_tokens": 5}
+    assert "api_key" not in out and "password" not in out
+    assert out["providers"]["a"] == {"base_url": "u"}
+    assert out["auth"] == {"mode": "oauth"}

@@ -15,20 +15,38 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Callable
 
 
+def classify_aux(body: dict[str, Any]) -> str:
+    """Guess which auxiliary task a request is, from its prompt (auxiliary calls carry no task id)."""
+    text = json.dumps(body.get("messages") or body.get("system") or "", ensure_ascii=False).lower()[:6000]
+    if "title" in text and ("conversation" in text or "session" in text) and "summar" not in text[:400]:
+        return "title_generation"
+    if any(w in text for w in ("summar", "compact", "compress", "handoff")):
+        return "compression"
+    if "title" in text:
+        return "title_generation"
+    return "other"
+
+
 class Stub:
-    def __init__(self, aux_texts: list[str], on_event: Callable[[str, dict[str, Any]], None], model: str = "ariadne-replay"):
-        self.aux = list(aux_texts)
+    def __init__(self, aux_texts: list[Any], on_event: Callable[[str, dict[str, Any]], None], model: str = "ariadne-replay"):
+        # aux_texts: [(task, text)] in recorded order (plain strings are accepted as task "other")
+        self.aux = [a if isinstance(a, tuple) else ("other", a) for a in aux_texts]
         self.on_event = on_event
         self.model = model
         self.lock = threading.Lock()
         self.server: ThreadingHTTPServer | None = None
         self.armed = True  # False during warm-up: aux calls get a placeholder and keep the recorded queue
 
-    def _next_aux(self) -> str:
+    def _next_aux(self, task: str = "other") -> str:
         with self.lock:
             if not self.armed:
                 return "Warm-up"
-            return self.aux.pop(0) if self.aux else "Replayed session"
+            for i, (t, text) in enumerate(self.aux):
+                if t == task:
+                    return self.aux.pop(i)[1]
+            if task == "other" and self.aux:
+                return self.aux.pop(0)[1]
+            return "Replayed session"
 
     def start(self) -> int:
         stub = self
@@ -66,9 +84,10 @@ class Stub:
                     self._send(503, {"error": {"message": "ariadne replay: model calls are served from the cassette"}})
                     return
                 armed = stub.armed
-                text = stub._next_aux()
+                task = classify_aux(body)
+                text = stub._next_aux(task)
                 if armed:
-                    stub.on_event("aux_served", {"path": path})
+                    stub.on_event("aux_served", {"path": path, "task": task})
                 usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
                 if path.endswith("/messages"):
                     msg = {"id": "ariadne-aux", "type": "message", "role": "assistant", "model": stub.model,

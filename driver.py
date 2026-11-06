@@ -137,30 +137,7 @@ def recorded_provider(tape: cas.Cassette) -> str:
     return tape.header.get("provider") or first.get("provider") or "custom"
 
 
-def _read_yaml(path: Path) -> dict[str, Any]:
-    if not path.is_file():
-        return {}
-    try:
-        import yaml  # type: ignore
-        data = yaml.safe_load(path.read_text(encoding="utf-8"))
-    except Exception:
-        try:
-            data = json.loads(path.read_text(encoding="utf-8"))
-        except Exception:
-            data = {}
-    return data if isinstance(data, dict) else {}
-
-
-_SECRETISH = ("key", "token", "secret", "password", "passwd", "credential", "auth")
-
-
-def _strip_secrets(v: Any) -> Any:
-    if isinstance(v, dict):
-        return {k: _strip_secrets(x) for k, x in v.items()
-                if not (isinstance(k, str) and any(s in k.lower() for s in _SECRETISH))}
-    if isinstance(v, list):
-        return [_strip_secrets(x) for x in v]
-    return v
+from .util import read_yaml as _read_yaml, strip_secrets as _strip_secrets  # noqa: E402
 
 
 # Context Hermes folds into the system prompt. Credentials (.env, auth.json, ...) are never copied.
@@ -177,7 +154,8 @@ def clone_context(src: Path, dst: Path) -> None:
         if (src / name).is_dir():
             shutil.copytree(src / name, dst / name, dirs_exist_ok=True,
                             ignore=shutil.ignore_patterns(".git", "__pycache__", "*.pyc", ".env", "*.key"))
-    cfg = _strip_secrets(_read_yaml(src / "config.yaml"))
+    from .util import settings_only
+    cfg = settings_only(_strip_secrets(_read_yaml(src / "config.yaml")))
     if cfg:
         (dst / "config.yaml").write_text(json.dumps(cfg, indent=2, default=str), encoding="utf-8")
 
@@ -190,7 +168,9 @@ def _scratch_config(tape: cas.Cassette, stub_port: int, provider: str | None = N
     if not snap and isinstance(h.get("config_snapshot"), dict):
         snap = h["config_snapshot"]
     cfg: dict[str, Any] = {k: v for k, v in snap.items() if k not in ("model", "providers", "custom_providers", "fallback_providers", "fallback_model")}
-    cfg["model"] = {"provider": provider, "model": model, "base_url": f"http://127.0.0.1:{stub_port}/v1",
+    recorded_model = snap.get("model") if isinstance(snap.get("model"), dict) else {}
+    cfg["model"] = {**{k: v for k, v in recorded_model.items() if k not in ("provider", "base_url", "api_key", "api_mode", "default", "model")},
+                    "provider": provider, "model": model, "base_url": f"http://127.0.0.1:{stub_port}/v1",
                     "api_key": "ariadne-replay-offline"}
     plugins = cfg.get("plugins") if isinstance(cfg.get("plugins"), dict) else {}
     enabled = [p for p in (plugins.get("enabled") or []) if isinstance(p, str)]
@@ -244,7 +224,7 @@ def play(cassette_path: str | Path, opts: PlayOptions | None = None) -> PlayResu
         with open(report, "a", encoding="utf-8") as fh:
             fh.write(json.dumps({"type": type_, "t": round(time.time(), 3), **data}) + "\n")
 
-    stub = Stub([e.get("response_text") or "" for e in tape.of("aux")], emit, model=tape.header.get("model") or "ariadne-replay")
+    stub = Stub([(e.get("aux_task") or "other", e.get("response_text") or "") for e in tape.of("aux")], emit, model=tape.header.get("model") or "ariadne-replay")
     port = stub.start()
     recorded = recorded_provider(tape)
     # Signed-in providers (nous, codex, ...) cannot start without the user's credentials, which a
@@ -284,8 +264,7 @@ def play(cassette_path: str | Path, opts: PlayOptions | None = None) -> PlayResu
     (ctl_dir / runtime.CONTROL_FILE).write_text(json.dumps(control), encoding="utf-8")
 
     cwd = tape.header.get("cwd") if tape.header.get("cwd") and Path(tape.header["cwd"]).is_dir() else str(run_dir)
-    turns = [t.get("user_message") for t in tape.turns()]
-    turns = [t if isinstance(t, str) else json.dumps(t) for t in turns if t is not None]
+    turns = tape.actions()
     if opts.fork_prompt:
         turns.append(opts.fork_prompt)
     expected = len(tape.of("llm"))
@@ -340,6 +319,13 @@ def drive_session(hermes_python: str, env: dict[str, str], cwd: str, turns: list
     try:
         sid = _handshake(client, turn_timeout, errors)
         for text in turns if sid else []:
+            if isinstance(text, dict) and text.get("rpc"):
+                # A session action (e.g. session.compress) rather than a user message.
+                ok = _run_rpc(client, sid, text["rpc"], text.get("params") or {}, turn_timeout, errors)
+                replies.append(f"<{text['rpc']}: {json.dumps(ok)[:300] if ok else 'failed'}>")
+                if not ok:
+                    break
+                continue
             reply = _run_turn(client, sid, text, turn_timeout, errors)
             sent += 1
             replies.append(reply if reply is not None else "")
@@ -406,6 +392,32 @@ def _handshake(client: RpcClient, timeout: float, errors: list[str]) -> str | No
 
     sid = _wait(client, created, timeout, errors)
     return sid or None
+
+
+def _run_rpc(client: RpcClient, sid: str, method: str, params: dict[str, Any], timeout: float, errors: list[str]) -> Any:
+    """Run one session action; a 'session busy' (4009) answer is retried until the turn's
+    post-processing finishes, the same way the Desktop app retries."""
+    deadline = time.monotonic() + timeout
+    while True:
+        rid = client.call(method, {"session_id": sid, **params})
+        busy: list[bool] = []
+
+        def done(m: dict[str, Any]):
+            if m.get("id") == rid:
+                if "error" in m:
+                    if (m["error"] or {}).get("code") == 4009 and time.monotonic() < deadline:
+                        busy.append(True)
+                        return False
+                    errors.append(f"{method} failed: {m['error']}")
+                    return False
+                return m.get("result") or {"ok": True}
+            return None
+
+        got = _wait(client, done, max(1.0, deadline - time.monotonic()), errors)
+        if busy:
+            time.sleep(0.5)
+            continue
+        return got or False
 
 
 def _run_turn(client: RpcClient, sid: str, text: str, timeout: float, errors: list[str]) -> str | None:

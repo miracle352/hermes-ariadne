@@ -111,6 +111,9 @@ def _response_text(resp: Any) -> str | None:
     """Best-effort assistant text from a (sanitized) auxiliary response."""
     try:
         if isinstance(resp, dict):
+            am = resp.get("assistant_message")
+            if isinstance(am, dict) and isinstance(am.get("content"), str):
+                return am["content"]
             ch = resp.get("choices") or []
             if ch:
                 return ((ch[0] or {}).get("message") or {}).get("content")
@@ -162,6 +165,10 @@ class Recorder:
                     "api_mode": ctx.get("api_mode") or "",
                     "base_url_host": _host(ctx.get("base_url")),
                     "recorder": {"ariadne": _plugin_version(), "pid": os.getpid()},
+                    # Settings shape how Hermes builds requests (compression, toolsets, agent...);
+                    # a replay on another machine reuses them. Credentials are stripped and the
+                    # rest is scrubbed.
+                    "config_snapshot": _config_snapshot(),
                 }
                 w = cas.Writer(cassette_dir() / f"{cid}{cas.SUFFIX}", header)
                 self.writers[root] = w
@@ -235,6 +242,8 @@ class Recorder:
     def on_post_auxiliary_call(self, **kw: Any) -> None:
         def save() -> None:
             sid = kw.get("session_id") or ""
+            if not sid and len(self.writers) == 1:
+                sid = next(iter(self.writers))  # e.g. compression summaries carry no session id
             if not sid or self._root(sid) not in self.writers:
                 return  # side traffic outside a recorded session
             self.writer(sid).append(
@@ -248,7 +257,7 @@ class Recorder:
         if old and new:
             self.link(new, old)
         self._safe(lambda: self.writer(new or old or "").append(
-            "compaction", old_session_id=old, session_id=new, kind=kw.get("kind"), reason=kw.get("reason"),
+            "compaction", old_session_id=old, session_id=new, compaction_kind=kw.get("kind"), reason=kw.get("reason"),
             before_tokens=kw.get("before_tokens"), after_tokens=kw.get("after_tokens")))
 
     def on_subagent_start(self, **kw: Any) -> None:
@@ -483,6 +492,19 @@ def synthetic_response(api_mode: str, text: str) -> Any:
     message = SimpleNamespace(role="assistant", content=text, tool_calls=None, reasoning_content=None, refusal=None)
     return SimpleNamespace(id="ariadne-synthetic", model="ariadne", provider=None, usage=usage,
                            choices=[SimpleNamespace(index=0, message=message, finish_reason="stop")])
+
+
+def _config_snapshot() -> dict[str, Any]:
+    try:
+        from .util import read_yaml, settings_only, strip_secrets
+        cfg = settings_only(strip_secrets(read_yaml(Path(hermes_home()) / "config.yaml")))
+        model = cfg.get("model") if isinstance(cfg.get("model"), dict) else {}
+        # The replay runs on its own stand-in endpoint; keep the model *settings* (context_length,
+        # reasoning, ...) because they change how Hermes builds requests.
+        cfg["model"] = {k: v for k, v in model.items() if k not in ("provider", "base_url", "api_key", "api_mode")}
+        return redact.scrub(cfg)
+    except Exception:
+        return {}
 
 
 def _host(url: Any) -> str:

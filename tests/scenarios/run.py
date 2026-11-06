@@ -46,7 +46,8 @@ def record(scn: dict, python_a: str, work: Path) -> Path | None:
     server = scripted_model.serve(0, _fill(scn["script"], str(project)), work / "model-log")
     cfg = {"model": {"provider": "custom", "model": "scripted", "base_url": f"http://127.0.0.1:{server.server_address[1]}/v1", "api_key": "none"},
            "plugins": {"enabled": ["ariadne"], "disabled": []}}
-    cfg.update(scn.get("config") or {})
+    from importlib import import_module
+    cfg = import_module(f"{REPO.name}.util").deep_merge(cfg, scn.get("config") or {})
     (home / "config.yaml").write_text(json.dumps(cfg))
     (home / "plugin-data" / "ariadne").mkdir(parents=True)
     (home / "plugin-data" / "ariadne" / "control.json").write_text('{"mode": "record"}')
@@ -56,6 +57,7 @@ def record(scn: dict, python_a: str, work: Path) -> Path | None:
     replies, errors, _, tail = driver.drive_session(python_a, env, str(project), _fill(scn["turns"], str(project)), 120,
                                                     drain=lambda: False, idle=6.0)
     server.shutdown()
+    print("    record replies:", [r[:160] for r in replies])
     (home / "plugin-data" / "ariadne" / "control.json").unlink()
     tapes = sorted((home / "plugin-data" / "ariadne" / "cassettes").glob("*.cassette.jsonl"))
     if errors or not tapes:
@@ -81,7 +83,7 @@ def main() -> int:
             continue
         kinds = [json.loads(l).get("kind") for l in tape.read_text().splitlines()[1:]]
         print(f"    cassette: {dict((k, kinds.count(k)) for k in sorted(set(kinds)))}")
-        res = driver.play(tape, driver.PlayOptions(hermes_python=python_a, turn_timeout=120, keep=False))
+        res = driver.play(tape, driver.PlayOptions(hermes_python=python_a, turn_timeout=120, keep=False))  # config from the cassette snapshot
         det = res.verdict
         print(f"    replay on A: {det}")
         if det != "identical":

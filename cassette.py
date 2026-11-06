@@ -33,6 +33,9 @@ SUFFIX = ".cassette.jsonl"
 INJECTED_PREFIXES = ("[ASYNC DELEGATION", "[BACKGROUND PROCESS", "[PROCESS COMPLETE", "[DELEGATION RESULT")
 
 
+MANUAL_COMPACTION_REASONS = ("manual", "user", "slash", "slash_command", "/compress", "rpc", "session.compress")
+
+
 def is_injected(message: Any) -> bool:
     return isinstance(message, str) and message.lstrip().upper().startswith(INJECTED_PREFIXES)
 
@@ -79,6 +82,19 @@ class Cassette:
 
     def of(self, kind: str) -> list[dict[str, Any]]:
         return [e for e in self.events if e.get("kind") == kind]
+
+    def actions(self) -> list[Any]:
+        """What the driver must do, in order: user turns (text) and manual session actions.
+        Automatic compactions are not actions: Hermes repeats those by itself."""
+        user_turns = {id(t) for t in self.turns()}
+        out: list[Any] = []
+        for e in self.events:
+            if e.get("kind") == "turn" and id(e) in user_turns:
+                msg = e.get("user_message")
+                out.append(msg if isinstance(msg, str) else json.dumps(msg))
+            elif e.get("kind") == "compaction" and str(e.get("reason") or "").lower() in MANUAL_COMPACTION_REASONS:
+                out.append({"rpc": "session.compress"})
+        return out
 
     def turns(self) -> list[dict[str, Any]]:
         """User turns only: a subagent's task arrives through pre_llm_call too, but the parent
