@@ -33,9 +33,14 @@ runs:
       run: |
         git clone --quiet --depth 1 --branch "${{ inputs.hermes-ref }}" https://github.com/NousResearch/hermes-agent.git "$RUNNER_TEMP/hermes-agent" \
           || { git clone --quiet https://github.com/NousResearch/hermes-agent.git "$RUNNER_TEMP/hermes-agent" && git -C "$RUNNER_TEMP/hermes-agent" checkout --quiet "${{ inputs.hermes-ref }}"; }
-        EXTRAS="${{ inputs.hermes-extras }}"
+        # Install exactly what Hermes's uv.lock pins (a fresh resolution can pick conflicting versions).
+        EXTRA_ARGS=()
+        IFS=',' read -ra EXTRAS <<< "${{ inputs.hermes-extras }}"
+        for e in "${EXTRAS[@]}"; do [ -n "$e" ] && EXTRA_ARGS+=(--extra "$e"); done
+        (cd "$RUNNER_TEMP/hermes-agent" && uv export --quiet --frozen --no-hashes --no-emit-project "${EXTRA_ARGS[@]}" -o "$RUNNER_TEMP/hermes-requirements.txt")
         uv venv --quiet "$RUNNER_TEMP/hermes-venv" --python "${{ inputs.python-version }}"
-        VIRTUAL_ENV="$RUNNER_TEMP/hermes-venv" uv pip install --quiet -e "$RUNNER_TEMP/hermes-agent${EXTRAS:+[$EXTRAS]}"
+        VIRTUAL_ENV="$RUNNER_TEMP/hermes-venv" uv pip install --quiet --no-deps -r "$RUNNER_TEMP/hermes-requirements.txt"
+        VIRTUAL_ENV="$RUNNER_TEMP/hermes-venv" uv pip install --quiet --no-deps -e "$RUNNER_TEMP/hermes-agent"
     - name: Replay cassettes
       shell: bash
       run: |
