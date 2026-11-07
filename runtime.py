@@ -399,6 +399,7 @@ class Replayer:
             substituted = bool(self.control.get("provider_substituted"))
             rec_core, rec_env = normalize.split_environment(recorded.get("system") or [], substituted)
             live_core, live_env = normalize.split_environment(live.get("system") or [], substituted)
+            rec_core, live_core = normalize.settle_skills(rec_core, rec_env, live_core, live_env)
             env_delta = normalize.environment_delta(rec_env, live_env)
             rec_msgs, rec_fc = normalize.strip_first_contact(recorded.get("messages") or [])
             live_msgs, live_fc = normalize.strip_first_contact(live.get("messages") or [])

@@ -96,8 +96,9 @@ def diff_live(a: list[dict[str, Any]], b: list[dict[str, Any]]) -> list[dict[str
         out.append({"kind": "model_call_count", "a": len(la), "b": len(lb)})
     for ea, eb in zip(la, lb):
         ra, rb = ea.get("request") or {}, eb.get("request") or {}
-        ca, _ = normalize.split_environment(ra.get("system") or [])
-        cb, _ = normalize.split_environment(rb.get("system") or [])
+        ca, ea = normalize.split_environment(ra.get("system") or [])
+        cb, eb = normalize.split_environment(rb.get("system") or [])
+        ca, cb = normalize.settle_skills(ca, ea, cb, eb)
         diffs = normalize.diff({**ra, "system": ca}, {**rb, "system": cb})
         if diffs:
             out.append({"kind": "model_request", "n": ea.get("n"),

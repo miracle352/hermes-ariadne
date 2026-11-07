@@ -126,3 +126,20 @@ def test_trajectory_matches_tool_results_by_position():
     tool = conv[2]["value"]
     assert tool.index('"name": "read_file"') < tool.index('"name": "terminal"')
     assert conv[3]["value"].startswith("<think>\nthought\n</think>\n") and conv[3]["value"].endswith("done")
+
+
+def test_skills_section_presence_is_environment():
+    split_environment, settle_skills, environment_delta = normalize.split_environment, normalize.settle_skills, normalize.environment_delta
+    section = ("\n\n## Skills\nBefore replying, scan the skills below.\n\n<available_skills>\n  - a: b\n"
+               "</available_skills>\n\nOnly proceed without loading a skill if genuinely none are relevant to the task.\n\n")
+    bare = ["Intro.\n\nOutro."]
+    skilled = ["Intro." + section + "Outro."]
+    rc, re_ = split_environment(bare)
+    lc, le = split_environment(skilled)
+    rc, lc = settle_skills(rc, re_, lc, le)
+    assert rc == lc
+    assert environment_delta(re_, le)["skills_section"] == "added"
+    # with the section on both sides, a wording change is still a difference
+    lc2, le2 = split_environment([skilled[0].replace("scan the skills", "read the skills")])
+    a, b = settle_skills(*split_environment(skilled), lc2, le2)
+    assert a != b

@@ -213,6 +213,11 @@ _ENV_LINES = [
     re.compile(r"^User home directory:.*$", re.M),
 ]
 _PROVIDER_LINE = re.compile(r"^Provider: .*$", re.M)
+# The whole "## Skills" section only exists when the profile has skills, so whether it is there
+# at all is a property of the machine. Its wording is still Hermes's: settle_skills() puts it back
+# when both sides have it, so a wording change stays drift.
+_SKILLS_SECTION = re.compile(r"\n*## Skills\n[\s\S]*?<available_skills/>[\s\S]*?Only proceed without loading a skill[^\n]*\n*")
+_SECTION_MARK = "\x00skills-section\x00"
 
 
 def split_environment(system: list[Any], provider_substituted: bool = False) -> tuple[list[Any], dict[str, Any]]:
@@ -226,11 +231,28 @@ def split_environment(system: list[Any], provider_substituted: bool = False) -> 
             env["skills"].extend(sorted(line.strip() for line in block.splitlines()
                                         if line.strip().startswith("- ")))
         text = _SKILLS_BLOCK.sub("<available_skills/>", part)
+        found = _SKILLS_SECTION.search(text)
+        if found:
+            env["skills_section"] = found.group(0)
+            text = text[:found.start()] + _SECTION_MARK + text[found.end():]
         for pattern in _ENV_LINES + ([_PROVIDER_LINE] if provider_substituted else []):
             env["lines"].extend(pattern.findall(text))
             text = pattern.sub("<environment/>", text)
         core.append(text)
     return core, env
+
+
+def settle_skills(rec_core: list[Any], rec_env: dict[str, Any],
+                  live_core: list[Any], live_env: dict[str, Any]) -> tuple[list[Any], list[Any]]:
+    """Restore the skills section where both sides have it; drop it where only one does."""
+    both = "skills_section" in rec_env and "skills_section" in live_env
+
+    def fix(core: list[Any], env: dict[str, Any]) -> list[Any]:
+        sep = "\n\n"
+        return [part.replace(_SECTION_MARK, env["skills_section"] if both else sep) if isinstance(part, str) else part
+                for part in core]
+
+    return fix(rec_core, rec_env), fix(live_core, live_env)
 
 
 def environment_delta(rec_env: dict[str, Any], live_env: dict[str, Any]) -> dict[str, Any]:
@@ -239,6 +261,8 @@ def environment_delta(rec_env: dict[str, Any], live_env: dict[str, Any]) -> dict
     if rs != ls:
         out["skills_added"] = sorted(ls - rs)
         out["skills_removed"] = sorted(rs - ls)
+    if ("skills_section" in rec_env) != ("skills_section" in live_env):
+        out["skills_section"] = "added" if "skills_section" in live_env else "removed"
     rl, ll = rec_env.get("lines") or [], live_env.get("lines") or []
     if rl != ll:
         out["lines"] = {"recorded": rl, "live": ll}
