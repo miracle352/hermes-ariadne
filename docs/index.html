@@ -188,12 +188,13 @@ pre .c{color:var(--dim)}pre .k{color:var(--ember)}pre .s{color:#E9D8C6}
 
 /* footer */
 footer{padding:150px 0 50px;position:relative;overflow:hidden}
-footer .huge{font-family:Display;font-weight:800;font-size:clamp(80px,15.5vw,250px);letter-spacing:-.06em;line-height:.8;color:transparent;-webkit-text-stroke:1px #3A3532;margin-top:90px;white-space:nowrap;user-select:none}
+footer .huge{font-family:Display;font-weight:800;font-size:200px;letter-spacing:-.06em;line-height:.8;color:transparent;-webkit-text-stroke:1px #3A3532;margin-top:90px;white-space:nowrap;user-select:none}
 footer .huge span{background:linear-gradient(90deg,var(--flame),var(--ember));-webkit-background-clip:text;background-clip:text;-webkit-text-stroke:0;color:transparent;clip-path:inset(0 100% 0 0);transition:clip-path 1.6s var(--ease);display:inline-block}
 footer .huge.on span{clip-path:inset(0 0 0 0)}
 footer .bottom{display:flex;justify-content:space-between;margin-top:40px;color:var(--dim);font-size:13px;flex-wrap:wrap;gap:12px}
 .install{display:flex;justify-content:space-between;align-items:flex-end;gap:40px;flex-wrap:wrap}
-.install code{display:block;margin-top:24px;font-family:Mono;font-size:15px;padding:16px 20px;border:1px solid var(--line);border-radius:12px;background:var(--ink2);color:var(--soft)}
+.install>div{min-width:0;max-width:100%}
+.install code{display:block;margin-top:24px;max-width:100%;font-family:Mono;font-size:15px;padding:16px 20px;border:1px solid var(--line);border-radius:12px;background:var(--ink2);color:var(--soft)}
 .install code b{color:var(--flame);font-weight:400}
 
 .fade{opacity:0;transform:translateY(40px);transition:opacity 1.1s var(--ease),transform 1.1s var(--ease)}
@@ -205,7 +206,10 @@ footer .bottom{display:flex;justify-content:space-between;margin-top:40px;color:
  .story .steps{height:auto}.step{position:relative;opacity:1;transform:none;margin-bottom:50px}.progress{display:none}
  .stage{display:none}
  .proof .grid{grid-template-columns:1fr 1fr}.feats,.finding .in,.ci .in{grid-template-columns:1fr}
- .hero-mark{opacity:.25;width:70vw;right:-10vw}
+ .hero-mark{opacity:.16;width:78vw;right:-18vw;top:8%}
+ .install code{font-size:12.5px;white-space:nowrap;overflow-x:auto}
+ .marquee .track{font-size:30px}
+ .statement{padding:110px 0 80px}
 }
 @media (prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}.hero h1 span,.reveal-up,.fade{transform:none!important;opacity:1!important}}
 </style>
@@ -580,6 +584,10 @@ footer .bottom{display:flex;justify-content:space-between;margin-top:40px;color:
     $('#frame').style.transform = `rotateX(${18 * (1 - q)}deg) scale(${.92 + .08 * q})`
   }
   addEventListener('scroll', onScroll, { passive: true }); onScroll()
+
+  const huge = $('#huge'), hugeSpan = huge.querySelector('span')
+  const fitHuge = () => { huge.style.fontSize = '200px'; const w = hugeSpan.getBoundingClientRect().width; huge.style.fontSize = `${Math.floor(200 * (huge.clientWidth / w) * 0.98)}px` }
+  addEventListener('resize', fitHuge); document.fonts.ready.then(fitHuge); fitHuge()
 
   $$('.cell').forEach(c => c.addEventListener('pointermove', e => { const r = c.getBoundingClientRect(); c.style.setProperty('--mx', `${e.clientX - r.left}px`); c.style.setProperty('--my', `${e.clientY - r.top}px`) }))
 
