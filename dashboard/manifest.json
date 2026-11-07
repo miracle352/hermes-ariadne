@@ -1,0 +1,7 @@
+{
+  "name": "ariadne",
+  "label": "Ariadne",
+  "description": "Record, replay, bisect and fork Hermes sessions offline.",
+  "version": "0.1.0",
+  "api": "plugin_api.py"
+}
