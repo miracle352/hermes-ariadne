@@ -2,7 +2,7 @@ name: Ariadne replay
 description: Replay recorded Hermes sessions offline (no model, no network, no tokens) and fail on drift or broken hook contracts.
 branding:
   icon: rewind
-  color: purple
+  color: orange
 inputs:
   cassettes:
     description: Glob of cassette files to replay
