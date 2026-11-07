@@ -109,7 +109,7 @@ async def status():
     return {
         "recording": mode == "record", "mode": mode, "cassettes": len(cassettes),
         "runs": len(list((rt.data_dir() / "runs").glob("*/summary.json"))),
-        "contract_violations": len(_read_jsonl(rt.data_dir() / "contracts.jsonl")),
+        "contract_violations": len(_violations()),
         "data_dir": str(rt.data_dir()), "version": rt._plugin_version(),
         "jobs": [j.public() for j in JOBS.values() if j.state == "running"],
     }
@@ -217,10 +217,19 @@ async def run(rid: str):
     raise HTTPException(404, f"no run {rid}")
 
 
+def _violations() -> list[dict[str, Any]]:
+    """Broken hook promises seen while recording and during every replay or fork."""
+    rt = _mod("runtime")
+    rows = [{**r, "source": "recording"} for r in _read_jsonl(rt.data_dir() / "contracts.jsonl")]
+    for folder in ("runs", "forks"):
+        for report in sorted((rt.data_dir() / folder).glob("*/report.jsonl")):
+            rows += [{**r, "source": report.parent.name} for r in _read_jsonl(report) if r.get("type") == "contract_violation"]
+    return rows
+
+
 @router.get("/contracts")
 async def contracts():
-    rt = _mod("runtime")
-    rows = _read_jsonl(rt.data_dir() / "contracts.jsonl", limit=500)
+    rows = _violations()[-500:]
     promises = _mod("contracts").PROMISES
     return {"violations": rows, "promises": promises}
 
