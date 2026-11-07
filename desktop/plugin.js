@@ -332,8 +332,8 @@ const fmtVal = v => (v === undefined ? '∅' : typeof v === 'string' ? v : JSON.
 // --------------------------------------------------------------------------- data
 
 const KEY = ['plugin:ariadne']
-const useStatus = () => useQuery({ queryKey: [...KEY, 'status'], queryFn: () => rest('/status'), refetchInterval: 10000 })
-const useCassettes = () => useQuery({ queryKey: [...KEY, 'cassettes'], queryFn: () => rest('/cassettes'), refetchInterval: 15000 })
+const useStatus = () => useQuery({ queryKey: [...KEY, 'status'], queryFn: () => rest('/status'), refetchInterval: 10000, retry: 1 })
+const useCassettes = () => useQuery({ queryKey: [...KEY, 'cassettes'], queryFn: () => rest('/cassettes'), refetchInterval: 15000, retry: 1 })
 
 async function setRecording(on, qc) {
   await rest('/record', { body: { on }, method: 'POST' })
@@ -352,6 +352,23 @@ async function startJob(kind, body) {
     host.notifyError ? host.notifyError(String(err.message || err)) : host.notify({ kind: 'error', message: String(err) })
     return null
   }
+}
+
+function BackendDown({ error }) {
+  return h(
+    'div',
+    { className: 'ar-panel', style: { minHeight: 0 } },
+    h('div', { className: 'ar-eyebrow ar-mono' }, 'Backend not reachable'),
+    h('div', { className: 'ar-h2 ar-display', style: { margin: '6px 0 10px' } }, 'Ariadne’s Python half is not running'),
+    h(
+      'div',
+      { className: 'ar-note', style: { fontSize: 13 } },
+      'The page talks to routes that only load when the agent plugin is enabled. Run ',
+      h('code', { className: 'ar-mono' }, 'hermes plugins enable ariadne'),
+      ', then restart Hermes Desktop (or its gateway) so the routes load.'
+    ),
+    error && h('div', { className: 'ar-note ar-mono', style: { marginTop: 10, opacity: 0.7 } }, String(error.message || error))
+  )
 }
 
 // --------------------------------------------------------------------------- library
@@ -515,6 +532,9 @@ function Detail({ id }) {
   if (!id) {
     return h('div', { className: 'ar-panel' }, h(EmptyState, { description: 'Pick a recording on the left.', title: 'No session selected' }))
   }
+  if (q.isError) {
+    return h(BackendDown, { error: q.error })
+  }
   if (!q.data) {
     return h('div', { className: 'ar-panel' }, h(DecodeText, { loop: true, text: 'unwinding the thread…' }))
   }
@@ -556,6 +576,9 @@ function Library() {
   const q = useCassettes()
   const list = (q.data && q.data.cassettes) || []
   const [sel, setSel] = useState(null)
+  if (q.isError) {
+    return h(BackendDown, { error: q.error })
+  }
   const current = sel || (list[0] && list[0].id)
   if (q.isSuccess && !list.length) {
     return h(EmptyState, {
@@ -575,6 +598,9 @@ function Library() {
 
 function RunDetail({ id, onBack }) {
   const q = useQuery({ queryKey: [...KEY, 'run', id], queryFn: () => rest(`/runs/${encodeURIComponent(id)}`) })
+  if (q.isError) {
+    return h(BackendDown, { error: q.error })
+  }
   if (!q.data) {
     return h(DecodeText, { loop: true, text: 'reading the report…' })
   }
@@ -613,6 +639,9 @@ function Runs() {
     return h(RunDetail, { id: sel, onBack: () => setSel(null) })
   }
   const runs = (q.data && q.data.runs) || []
+  if (q.isError) {
+    return h(BackendDown, { error: q.error })
+  }
   if (q.isSuccess && !runs.length) {
     return h(EmptyState, { description: 'Replay a recording from the Library and the report lands here.', title: 'No replays yet' })
   }
@@ -645,6 +674,9 @@ function Runs() {
 
 function Contracts() {
   const q = useQuery({ queryKey: [...KEY, 'contracts'], queryFn: () => rest('/contracts'), refetchInterval: 20000 })
+  if (q.isError) {
+    return h(BackendDown, { error: q.error })
+  }
   if (!q.data) {
     return h(DecodeText, { loop: true, text: 'checking promises…' })
   }
@@ -746,7 +778,7 @@ function Page() {
         }),
         h('span', { className: 'ar-note ar-mono' }, s.version ? `ariadne ${s.version}` : '')
       ),
-      tab === 'library' ? h(Library) : tab === 'runs' ? h(Runs) : h(Contracts)
+      status.isError ? h(BackendDown, { error: status.error }) : tab === 'library' ? h(Library) : tab === 'runs' ? h(Runs) : h(Contracts)
     )
   )
 }
