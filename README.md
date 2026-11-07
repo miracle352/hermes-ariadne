@@ -1,5 +1,7 @@
 # Ariadne
 
+![Ariadne](docs/banner.png)
+
 Record a Hermes session once. Replay it later with no model, no network and no tokens, and see
 exactly what Hermes does differently.
 
@@ -47,6 +49,22 @@ hermes ariadne fork latest --at-turn 2 --prompt "do it without the terminal"
 Hermes's hook docs (every `pre_api_request` gets a `post_api_request`, `pre_llm_call` once per
 turn, subagents start and stop in pairs, and so on). It found one that Hermes breaks:
 [findings/001](findings/001-length-stopped-post-api-request/) (issue NousResearch/hermes-agent#150324, fix NousResearch/hermes-agent#150333).
+
+## In Hermes Desktop
+
+Ariadne adds a page to the Desktop sidebar. It lists your recordings, replays one with a click and
+lights up each model call and tool call as the replay reaches it, with the exact difference shown
+inline when something changed. You can fork from any turn, read past replays, and see which of
+Hermes's documented hook promises held. A REC chip in the status bar turns recording on and off,
+and recorded sessions get a small mark in the session list. It also ships an optional theme in
+jet black, soft white and flame orange.
+
+Install in one click: [hermes://plugin/install?repo=miracle352/hermes-ariadne&enable=1](hermes://plugin/install?repo=miracle352/hermes-ariadne&enable=1)
+
+The Desktop half is off until you turn it on under Capabilities → Plugins, like every unified
+plugin. Its backend routes only load when `ariadne` is in `plugins.enabled`.
+
+![Replay with an inline diff](docs/screenshots/drift.png)
 
 ## Training data
 
