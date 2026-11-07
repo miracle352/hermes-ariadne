@@ -1,0 +1,23 @@
+name: hermes-main-watch
+# Every day, replay the committed cassettes on the newest Hermes main and check
+# that Hermes still keeps the hook promises plugins rely on. The badge in the
+# README and on the site reflects the latest run.
+on:
+  schedule:
+    - cron: "17 5 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: ./
+        with:
+          cassettes: tests/cassettes/*.cassette.jsonl
+          plugin-path: ""
+          hermes-ref: main
+          fail-on: contract

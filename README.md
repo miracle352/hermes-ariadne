@@ -2,6 +2,8 @@
 
 ![Ariadne](docs/banner.png)
 
+[![ci](https://github.com/miracle352/hermes-ariadne/actions/workflows/ci.yml/badge.svg)](https://github.com/miracle352/hermes-ariadne/actions/workflows/ci.yml) [![Hermes main keeps its hook promises](https://github.com/miracle352/hermes-ariadne/actions/workflows/watch.yml/badge.svg)](https://github.com/miracle352/hermes-ariadne/actions/workflows/watch.yml)
+
 Record a Hermes session once. Replay it later with no model, no network and no tokens, and see
 exactly what Hermes does differently.
 
@@ -128,6 +130,12 @@ separately too.
   for real, with Hermes's normal approvals.
 - **`bisect` checks out commits** in the Hermes checkout you point it at. It refuses to start on a
   dirty tree and puts the original commit back when it finishes.
+
+## How it compares
+
+- **OrcaReplay** records at the network edge: it intercepts Hermes's TLS and serves the same bytes back. That works without touching Hermes, but it can't tell what Hermes meant to send, so any change to the prompt is just a byte mismatch. Its fork onto another model doesn't work on Hermes yet. Ariadne runs inside Hermes through the plugin middleware, so it can separate your machine's setup from real Hermes changes, check the hook contracts, bisect Hermes commits, and fork from any turn.
+- **agent-run-debugger** imports a saved trace and shows it, with an inert replay that runs nothing. Ariadne's replay runs the real Hermes again, so it tells you what the current Hermes does with the same session.
+- **`hermes record`** (PR #4446) captures tool calls so a workflow can be re-run later with a live model. That's automation; Ariadne is for testing: no model, and the result is a diff.
 
 ## Limits
 
