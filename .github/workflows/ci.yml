@@ -29,6 +29,8 @@ jobs:
         include:
           - hermes-ref: v0.23.0   # the cassettes were recorded here: every request must match
             fail-on: drift
+          - hermes-ref: v0.23.1   # the current release: hook contracts must hold
+            fail-on: contract
           - hermes-ref: main      # main has intended changes; hook contracts must still hold
             fail-on: contract
     steps:

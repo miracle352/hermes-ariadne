@@ -200,16 +200,31 @@ footer .bottom{display:flex;justify-content:space-between;margin-top:40px;color:
 .fade{opacity:0;transform:translateY(40px);transition:opacity 1.1s var(--ease),transform 1.1s var(--ease)}
 .fade.on{opacity:1;transform:none}
 
+h2.title,.step h3,.hero p.lead,.statement p{overflow-wrap:break-word}
+.finding .in>*,.ci .in>*,.feats>*,.install>*,.story .stick>*{min-width:0}
+code,.card div{overflow-wrap:anywhere}
 @media (max-width:900px){
+ .finding .in,.ci .in,.feats{grid-template-columns:minmax(0,1fr)}
+ .finding h2.title{font-size:clamp(30px,9vw,44px)!important}
+ .card{padding:20px 18px;font-size:12px}
+ .card .h{flex-wrap:wrap;gap:4px}
+ .hero .eyebrow{position:relative;z-index:1}
+ .wrap{padding-left:20px;padding-right:20px}
  .links .hide{display:none}
  .story{height:auto}.story .stick{position:relative;height:auto;grid-template-columns:1fr;padding:60px 32px}
  .story .steps{height:auto}.step{position:relative;opacity:1;transform:none;margin-bottom:50px}.progress{display:none}
  .stage{display:none}
  .proof .grid{grid-template-columns:1fr 1fr}.feats,.finding .in,.ci .in{grid-template-columns:1fr}
  .hero-mark{opacity:.16;width:78vw;right:-18vw;top:8%}
- .install code{font-size:12.5px;white-space:nowrap;overflow-x:auto}
+ .install code{font-size:12px;white-space:normal;overflow-wrap:anywhere}
  .marquee .track{font-size:30px}
  .statement{padding:110px 0 80px}
+}
+@media (max-width:380px){
+ .links{gap:10px}
+ .brand{font-size:18px}
+ .hero h1{font-size:clamp(60px,21vw,80px)}
+ .btn{padding:12px 18px;font-size:14px}
 }
 @media (prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}.hero h1 span,.reveal-up,.fade{transform:none!important;opacity:1!important}}
 </style>
