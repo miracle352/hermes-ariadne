@@ -96,7 +96,7 @@ def _reply_shape(reply: str) -> str:
     follow from how long the request was; the request diff already shows that change."""
     import re
     text = reply if isinstance(reply, str) else json.dumps(reply)
-    if text.lstrip().startswith("{"):
+    if text.lstrip().startswith(("{", "<session.")):  # e.g. "<session.compress: {...}"
         return re.sub(r"\d+", "#", text)
     return text
 

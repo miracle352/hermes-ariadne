@@ -200,3 +200,11 @@ def test_another_hermes_never_inherits_our_import_path(monkeypatch):
     other = util.env_for("/somewhere/else/venv/bin/python")
     assert "PYTHONPATH" not in other and other["PYTHONSAFEPATH"] == "1"
     assert util.env_for(sys.executable)["PYTHONPATH"] == "/opt/current-hermes"
+
+
+def test_compare_ignores_token_counts_in_command_output():
+    compare = importlib.import_module(f"{pkg}.compare")
+    a = '<session.compress: {"before_tokens": 15172, "after_tokens": 13708}>'
+    b = '<session.compress: {"before_tokens": 15274, "after_tokens": 13810}>'
+    assert compare._reply_shape(a) == compare._reply_shape(b)
+    assert compare._reply_shape("Noted 7.") != compare._reply_shape("Noted 8.")
