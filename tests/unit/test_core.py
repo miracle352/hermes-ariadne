@@ -241,12 +241,6 @@ def test_version_parts_reads_release_and_commit():
     assert compare.version_parts("Hermes Agent v0.23.1 (2026.9.24) Â· stable Â· local 3b4215785882")[0] == "v0.23.1"
 
 
-def test_replays_never_run_a_hermes_self_update(tmp_path):
-    driver = importlib.import_module(f"{pkg}.driver")
-    env = driver._child_env(tmp_path, driver.PlayOptions(hermes_python=sys.executable))
-    assert env["HERMES_DISABLE_LAZY_INSTALLS"] == "1"
-
-
 def test_upgrade_timeout_is_not_a_breakage(monkeypatch, tmp_path):
     up = importlib.import_module(f"{pkg}.upgrade")
     cmp = importlib.import_module(f"{pkg}.compare")

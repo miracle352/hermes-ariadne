@@ -360,7 +360,9 @@ def check_one(path: Path, current_py: str, new_py: str, plugins: list[Path] | No
         # A replay that ran out of time (or failed on the Hermes you run now) says nothing about
         # the new Hermes; report it as unchecked rather than as a breakage.
         reasons = [r for r in reasons if not r.startswith("The replay failed")]
-        reasons.insert(0, "Could not finish this replay in time, so it was not compared. Check it again on its own."
+        pending = any("source-update completion failed" in str(e) for c in new_errors + cur_errors for e in c.get("errors") or [])
+        reasons.insert(0, "Hermes has an unfinished update (run `hermes update` once), which stalls offline replays; not compared."
+                       if pending else "Could not finish this replay in time, so it was not compared. Check it again on its own."
                        if slow else "This session does not replay on the Hermes you run now, so it was not compared.")
         row = CassetteCheck(path.name.removesuffix(cas.SUFFIX), title, "unchecked", reasons[:1], new_v, cmp.changes)
         return row
