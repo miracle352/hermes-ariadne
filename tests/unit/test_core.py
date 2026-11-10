@@ -232,3 +232,10 @@ def test_upgrade_can_delete_read_only_git_files(tmp_path):
     os.chmod(f.parent, stat.S_IREAD | stat.S_IEXEC)  # also blocks deletion on Linux, like Windows read-only
     up._rmtree(tmp_path / "old")
     assert not (tmp_path / "old").exists()
+
+
+def test_version_parts_reads_release_and_commit():
+    compare = importlib.import_module(f"{pkg}.compare")
+    assert compare.version_parts("Hermes Agent v0.23.1 (2026.9.24) · stable · local 3b4215785882") == ("v0.23.1", "3b4215785882", False)
+    assert compare.version_parts("Hermes Agent v0.23.1+413.g5261d77 (2026.9.24) · stable · local 5261d7731413")[2] is True
+    assert compare.version_parts("Hermes Agent v0.23.1 (2026.9.24) Â· stable Â· local 3b4215785882")[0] == "v0.23.1"

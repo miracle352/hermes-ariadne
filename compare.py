@@ -53,8 +53,10 @@ def hermes_version(python: str) -> str:
     import tempfile
     from .util import env_for
     try:
+        env = env_for(python)
+        env["PYTHONIOENCODING"] = "utf-8"  # Windows consoles default to cp1252 and mangle the "·"
         out = subprocess.run([python, "-m", "hermes_cli.main", "--version"], capture_output=True, text=True, timeout=60,
-                             env=env_for(python), cwd=tempfile.gettempdir())
+                             env=env, cwd=tempfile.gettempdir(), encoding="utf-8", errors="replace")
         for line in (out.stdout or "").splitlines():
             line = line.strip()
             if line:
@@ -62,6 +64,14 @@ def hermes_version(python: str) -> str:
     except Exception:
         pass
     return "unknown"
+
+
+def version_parts(text: str) -> tuple[str | None, str | None, bool]:
+    """(release like "v0.23.1", local commit prefix, past-the-release?) from `hermes --version`."""
+    import re
+    rel = re.search(r"v(\d+\.\d+\.\d+)(\+\S*)?", text or "")
+    commit = re.search(r"\blocal ([0-9a-f]{7,40})\b", text or "")
+    return (f"v{rel.group(1)}" if rel else None, commit.group(1) if commit else None, bool(rel and rel.group(2)))
 
 
 def _load_live(result: driver.PlayResult) -> list[dict[str, Any]]:

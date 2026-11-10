@@ -764,6 +764,7 @@ const shortVersion = v => {
 
 const VERDICT = {
   safe: { word: 'Safe to update', tone: 'ok', line: 'Every recorded session behaves exactly the same on the new Hermes.' },
+  uptodate: { word: 'Up to date', tone: 'ok', line: 'You already run this Hermes, so there is nothing to compare. Pick main to see what the next update changes.' },
   minor: { word: 'Looks safe', tone: 'ok', line: 'Only wording changed: how Hermes describes some tools or instructs the model.' },
   changed: { word: 'Review first', tone: 'warn', line: 'The new Hermes handles some of your sessions differently. The details are below.' },
   broken: { word: 'Don’t update yet', tone: 'bad', line: 'A session failed or a promise plugins rely on broke on the new Hermes.' }
@@ -816,7 +817,7 @@ function UpgradeCheck() {
   const job = (st.data && st.data.job) || {}
   const running = job.state === 'running'
   const result = running ? null : job.result || (st.data && st.data.last)
-  const v = result ? (result.minor ? 'minor' : result.verdict) : null
+  const v = result ? (result.same_version ? 'uptodate' : result.minor ? 'minor' : result.verdict) : null
   const info = v && VERDICT[v]
   const rows = running ? job.rows || [] : (result && result.sessions) || []
   const start = async () => {
@@ -893,9 +894,9 @@ function UpgradeCheck() {
             'div',
             { className: 'ar-chips', style: { margin: 0 } },
             h('span', { className: 'ar-chip' }, `${shortVersion(result.current)} → ${/unknown/i.test(result.new || '') ? result.target : shortVersion(result.new)}`),
-            h('span', { className: 'ar-chip' }, h('b', null, result.counts.same), ' same'),
-            h('span', { className: 'ar-chip' }, h('b', null, result.counts.changed), ' changed'),
-            h('span', { className: 'ar-chip' }, h('b', null, result.counts.broken), ' broken'),
+            !result.same_version && h('span', { className: 'ar-chip' }, h('b', null, result.counts.same), ' same'),
+            !result.same_version && h('span', { className: 'ar-chip' }, h('b', null, result.counts.changed), ' changed'),
+            !result.same_version && h('span', { className: 'ar-chip' }, h('b', null, result.counts.broken), ' broken'),
             h('span', { className: 'ar-chip' }, `${result.seconds}s · 0 tokens`)
           )
         )

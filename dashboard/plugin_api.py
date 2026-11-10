@@ -372,7 +372,8 @@ async def upgrade_targets():
     if "current" not in _RELEASE_CACHE:
         _RELEASE_CACHE["current"] = cmp.hermes_version(sys.executable)
     rel = _RELEASE_CACHE.get("release")
-    on_release = bool(rel) and rel.lstrip("v") in str(_RELEASE_CACHE["current"]) and "+" not in str(_RELEASE_CACHE["current"])
+    cur_rel, _, ahead = cmp.version_parts(str(_RELEASE_CACHE["current"]))
+    on_release = bool(rel) and cur_rel == rel and not ahead
     return {"current": _RELEASE_CACHE["current"], "release": rel, "on_latest_release": on_release,
             "error": _RELEASE_CACHE.get("error")}
 

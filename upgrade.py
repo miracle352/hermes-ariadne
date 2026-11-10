@@ -367,6 +367,15 @@ def run(to: str = "release", cassettes: list[Path] | None = None, limit: int = 5
         raise RuntimeError("no recordings yet: turn recording on and use Hermes, then check again")
     progress({"stage": "resolve", "note": f"finding Hermes {to}"})
     new_py, label, commit = resolve(to, progress)
+    _, cur_commit, _ = compare.version_parts(current)
+    if commit and cur_commit and commit.startswith(cur_commit):
+        # Same code on both sides: nothing to replay.
+        result = {"verdict": "safe", "minor": False, "same_version": True, "target": label, "target_commit": commit,
+                  "current": current, "new": current, "counts": {"same": 0, "changed": 0, "broken": 0},
+                  "sessions": [], "plugins": [], "plugin_dep_errors": [], "started": started,
+                  "seconds": round(time.time() - started, 1)}
+        progress({"stage": "done", "result": result})
+        return result
     new = compare.hermes_version(new_py)
     if not new or "unknown" in new.lower():
         new = f"{label} ({commit[:8]})" if commit else label
@@ -415,6 +424,8 @@ def latest_result() -> dict[str, Any] | None:
 
 
 def render(result: dict[str, Any]) -> str:
+    if result.get("same_version"):
+        return f"You already run {result['target']} ({result['target_commit'][:8]}): there is nothing to update to. Try --to main."
     head = {"safe": "SAFE TO UPDATE", "changed": "REVIEW BEFORE UPDATING", "broken": "DO NOT UPDATE YET"}[result["verdict"]]
     if result.get("minor"):
         head = "LOOKS SAFE (WORDING CHANGES ONLY)"
