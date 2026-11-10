@@ -4,6 +4,8 @@ name: plugin-compat
 # replays of Ariadne's cassettes. Results go to the compat-data branch; the site reads them.
 # Plugin code runs only here, on a throwaway GitHub runner, inside scratch Hermes homes.
 on:
+  schedule:
+    - cron: "41 4 * * *"
   workflow_dispatch:
     inputs:
       only:
