@@ -103,8 +103,11 @@ def install(ref: str, progress: Progress = _quiet, max_age_hours: float = 6.0) -
         shutil.rmtree(root, ignore_errors=True)
     root.mkdir(parents=True)
     progress({"stage": "install", "note": f"downloading Hermes {ref}"})
+    # Releases carry their version; main and other refs work it out from the release tags with
+    # `git describe`, so they need history and tags (commits only: --filter=tree:0), not depth 1.
+    shallow = ["--depth", "1"] if _RELEASE.search("refs/tags/" + ref) else ["--filter=tree:0"]
     try:
-        _run(["git", "clone", "--quiet", "--depth", "1", "--branch", ref, REPO, str(src)])
+        _run(["git", "clone", "--quiet", *shallow, "--branch", ref, REPO, str(src)])
     except RuntimeError:  # a commit sha, not a branch or tag
         _run(["git", "clone", "--quiet", "--filter=blob:none", REPO, str(src)])
         _run(["git", "checkout", "--quiet", ref], cwd=src)

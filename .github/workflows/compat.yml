@@ -30,7 +30,8 @@ jobs:
         env:
           HERMES_REF: ${{ matrix.hermes-ref }}
         run: |
-          git clone --quiet --depth 1 --branch "$HERMES_REF" https://github.com/NousResearch/hermes-agent.git "$RUNNER_TEMP/hermes-agent"
+          DEPTH="--depth 1"; [[ "$HERMES_REF" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || DEPTH="--filter=tree:0"  # main needs tags for its version
+          git clone --quiet $DEPTH --branch "$HERMES_REF" https://github.com/NousResearch/hermes-agent.git "$RUNNER_TEMP/hermes-agent"
           git clone --quiet --depth 1 https://github.com/NousResearch/hermes-agent.git "$RUNNER_TEMP/catalog"
           (cd "$RUNNER_TEMP/hermes-agent" && uv export --quiet --frozen --no-hashes --no-emit-project --extra anthropic -o "$RUNNER_TEMP/req.txt")
           uv venv --quiet "$RUNNER_TEMP/hermes-venv" --python 3.14

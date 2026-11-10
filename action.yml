@@ -35,7 +35,8 @@ runs:
         HERMES_EXTRAS: ${{ inputs.hermes-extras }}
         PY_VERSION: ${{ inputs.python-version }}
       run: |
-        git clone --quiet --depth 1 --branch "$HERMES_REF" https://github.com/NousResearch/hermes-agent.git "$RUNNER_TEMP/hermes-agent" \
+        DEPTH="--depth 1"; [[ "$HERMES_REF" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || DEPTH="--filter=tree:0"  # main needs tags for its version
+        git clone --quiet $DEPTH --branch "$HERMES_REF" https://github.com/NousResearch/hermes-agent.git "$RUNNER_TEMP/hermes-agent" \
           || { git clone --quiet https://github.com/NousResearch/hermes-agent.git "$RUNNER_TEMP/hermes-agent" && git -C "$RUNNER_TEMP/hermes-agent" checkout --quiet "$HERMES_REF"; }
         # Install exactly what Hermes's uv.lock pins (a fresh resolution can pick conflicting versions).
         EXTRA_ARGS=()
