@@ -1,0 +1,314 @@
+"""Safe to update? Replay your own recorded sessions on a newer Hermes before you switch.
+
+The newer Hermes is installed into a throwaway folder under the plugin's data directory, from
+the Hermes git repository and its own uv.lock, so your real install is never touched. Each
+cassette is then replayed on both installs side by side (see compare.py), which cancels out
+everything about your machine: what is left is what the new Hermes does differently with your
+sessions. Replays are offline; only the install step uses the network (git and the package index).
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import time
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any, Callable
+
+from . import cassette as cas
+from . import compare, driver, runtime
+
+REPO = "https://github.com/NousResearch/hermes-agent.git"
+Progress = Callable[[dict[str, Any]], None]
+
+
+def _quiet(_: dict[str, Any]) -> None:
+    pass
+
+
+# ----------------------------------------------------------------------------- targets
+
+def _run(cmd: list[str], cwd: Path | None = None, timeout: float = 900) -> str:
+    out = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=timeout,
+                         encoding="utf-8", errors="replace")
+    if out.returncode != 0:
+        raise RuntimeError(f"{' '.join(cmd[:3])} failed: {(out.stderr or out.stdout).strip()[-600:]}")
+    return out.stdout
+
+
+_RELEASE = re.compile(r"refs/tags/(v(\d+)\.(\d+)\.(\d+))$")
+
+
+def pick_release(ls_remote: str) -> str:
+    """Newest plain release tag (no rc, canary or other suffix) in ``git ls-remote`` output."""
+    best: tuple[int, int, int] | None = None
+    tag = ""
+    for line in ls_remote.splitlines():
+        m = _RELEASE.search(line.strip())
+        if m and int(m.group(2)) < 1000:  # Hermes also has date tags (v2026.9.24); releases are vX.Y.Z
+            v = (int(m.group(2)), int(m.group(3)), int(m.group(4)))
+            if best is None or v > best:
+                best, tag = v, m.group(1)
+    if not tag:
+        raise RuntimeError("could not find a Hermes release tag")
+    return tag
+
+
+def latest_release() -> str:
+    return pick_release(_run(["git", "ls-remote", "--tags", "--refs", REPO, "v*"], timeout=60))
+
+
+def find_uv() -> str | None:
+    """uv on PATH, or the uv Hermes's own installer staged for this install."""
+    found = shutil.which("uv")
+    if found:
+        return found
+    probe = "from pm.install import uv_launcher; p = uv_launcher('uv'); print(p or '')"
+    try:
+        out = subprocess.run([sys.executable, "-c", probe], capture_output=True, text=True, timeout=30)
+        path = out.stdout.strip()
+        return path if path and Path(path).is_file() else None
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+
+def _venv_python(venv: Path) -> Path:
+    return venv / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+
+
+def _safe(ref: str) -> str:
+    return re.sub(r"[^A-Za-z0-9._-]+", "_", ref)[:60]
+
+
+def install(ref: str, progress: Progress = _quiet, max_age_hours: float = 6.0) -> tuple[Path, str]:
+    """Install Hermes ``ref`` into a throwaway env; returns (python, commit)."""
+    root = runtime.data_dir() / "hermes" / _safe(ref)
+    src, venv, stamp = root / "src", root / "venv", root / "installed.json"
+    py = _venv_python(venv)
+    if stamp.is_file() and py.is_file():
+        info = json.loads(stamp.read_text(encoding="utf-8"))
+        moving = not _RELEASE.search("refs/tags/" + ref)
+        if not moving or time.time() - info.get("at", 0) < max_age_hours * 3600:
+            progress({"stage": "install", "note": f"using the {ref} already installed for checks"})
+            return py, info.get("commit", "")
+    uv = find_uv()
+    if not uv:
+        raise RuntimeError("uv was not found. Install uv (https://docs.astral.sh/uv/) or point --to at a Hermes python")
+    if root.exists():
+        shutil.rmtree(root, ignore_errors=True)
+    root.mkdir(parents=True)
+    progress({"stage": "install", "note": f"downloading Hermes {ref}"})
+    try:
+        _run(["git", "clone", "--quiet", "--depth", "1", "--branch", ref, REPO, str(src)])
+    except RuntimeError:  # a commit sha, not a branch or tag
+        _run(["git", "clone", "--quiet", "--filter=blob:none", REPO, str(src)])
+        _run(["git", "checkout", "--quiet", ref], cwd=src)
+    commit = _run(["git", "rev-parse", "HEAD"], cwd=src).strip()
+    progress({"stage": "install", "note": "installing its pinned dependencies"})
+    req = root / "requirements.txt"
+    _run([uv, "export", "--quiet", "--frozen", "--no-hashes", "--no-emit-project",
+          "--extra", "anthropic", "-o", str(req)], cwd=src)
+    _run([uv, "venv", "--quiet", str(venv), "--python", f"{sys.version_info.major}.{sys.version_info.minor}"])
+    env = dict(os.environ, VIRTUAL_ENV=str(venv))
+    for args in (["-r", str(req)], ["-e", str(src)]):
+        out = subprocess.run([uv, "pip", "install", "--quiet", "--no-deps", "--python", str(py), *args],
+                             capture_output=True, text=True, env=env, timeout=1800)
+        if out.returncode != 0:
+            raise RuntimeError(f"installing Hermes {ref} failed: {(out.stderr or out.stdout).strip()[-600:]}")
+    stamp.write_text(json.dumps({"ref": ref, "commit": commit, "at": time.time()}), encoding="utf-8")
+    return py, commit
+
+
+def resolve(to: str, progress: Progress = _quiet) -> tuple[str, str, str]:
+    """``to`` -> (python, label, commit). ``release`` | ``main`` | a git ref | a python path."""
+    p = Path(to).expanduser()
+    if p.is_file():
+        return str(p), p.parent.parent.name or str(p), ""
+    if p.is_dir() and _venv_python(p).is_file():
+        return str(_venv_python(p)), p.name, ""
+    ref = latest_release() if to in ("release", "latest") else to
+    py, commit = install(ref, progress)
+    return str(py), ref, commit
+
+
+# ----------------------------------------------------------------------------- verdicts
+
+def _tool_map(live: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    out: dict[str, dict[str, Any]] = {}
+    for e in live:
+        if e.get("kind") != "llm":
+            continue
+        for t in (e.get("request") or {}).get("tools") or []:
+            if isinstance(t, dict):
+                fn = t.get("function") if isinstance(t.get("function"), dict) else t
+                if isinstance(fn.get("name"), str):
+                    out.setdefault(fn["name"], fn)
+    return out
+
+
+def _params(fn: dict[str, Any]) -> Any:
+    return fn.get("parameters") or fn.get("input_schema") or {}
+
+
+def _names(xs: list[str], cap: int = 6) -> str:
+    xs = sorted(xs)
+    return ", ".join(xs[:cap]) + (f" and {len(xs) - cap} more" if len(xs) > cap else "")
+
+
+def explain(changes: list[dict[str, Any]], live_a: list[dict[str, Any]], live_b: list[dict[str, Any]]) -> list[str]:
+    """Plain sentences for what the new Hermes does differently."""
+    out: list[str] = []
+    sections: set[str] = set()
+    for ch in changes:
+        k = ch["kind"]
+        if k == "model_request":
+            sections.update(ch["sections"])
+        elif k == "model_call_count":
+            out.append(f"Makes {ch['b']} model calls where the current Hermes makes {ch['a']}.")
+        elif k == "tool_calls":
+            out.append("Runs a different sequence of tool calls.")
+        elif k == "final_replies":
+            out.append("Ends the session with a different reply.")
+        elif k == "replay_error":
+            side = "the new Hermes" if ch.get("side") == "new" else "the current Hermes"
+            out.append(f"The replay failed on {side}: {str((ch.get('errors') or [''])[0])[:200]}")
+    if "tools" in sections:
+        added, removed, args, desc = set(), set(), set(), set()
+        for ch in changes:
+            for d in ch.get("diffs") or []:
+                path = str(d.get("path") or "")
+                if not path.startswith(".tools."):
+                    continue
+                name, _, rest = path[len(".tools."):].partition(".")
+                if not rest:
+                    (added if d.get("change") == "added" else removed if d.get("change") == "removed" else args).add(name)
+                elif rest.endswith("description"):
+                    desc.add(name)
+                else:
+                    args.add(name)
+        desc -= args
+        if not (added or removed or args or desc):  # tools sent as a list: compare by name
+            ta, tb = _tool_map(live_a), _tool_map(live_b)
+            added, removed = set(tb) - set(ta), set(ta) - set(tb)
+            args = {n for n in set(ta) & set(tb) if _params(ta[n]) != _params(tb[n])}
+            desc = {n for n in set(ta) & set(tb) if n not in args and ta[n] != tb[n]}
+        if added:
+            out.append(f"Gives the model new tools: {_names(list(added))}.")
+        if removed:
+            out.append(f"Takes tools away from the model: {_names(list(removed))}.")
+        if args:
+            out.append(f"Changes the arguments of: {_names(list(args))}.")
+        if desc:
+            out.append(f"Rewords how it describes: {_names(list(desc))}.")
+        if not (added or removed or args or desc):
+            out.append("Sends the tool list in a different order or format.")
+    if "system" in sections:
+        out.append("Gives the model different instructions (system prompt).")
+    if "messages" in sections:
+        out.append("Sends your conversation to the model differently.")
+    rest = sections - {"tools", "system", "messages"}
+    if rest:
+        out.append("Changes request settings: " + ", ".join(sorted(rest)) + ".")
+    return out
+
+
+MINOR = ("Rewords how it describes", "Gives the model different instructions", "Sends the tool list in a different order")
+
+
+@dataclass
+class CassetteCheck:
+    cassette: str
+    title: str
+    verdict: str                     # same | changed | broken
+    reasons: list[str] = field(default_factory=list)
+    new_violations: list[dict[str, Any]] = field(default_factory=list)
+    changes: list[dict[str, Any]] = field(default_factory=list)
+    minor: bool = False              # only wording changed
+
+
+def _violations(result: driver.PlayResult | None) -> list[dict[str, Any]]:
+    return [e for e in (result.events if result else []) if e.get("type") == "contract_violation"]
+
+
+def check_one(path: Path, current_py: str, new_py: str) -> CassetteCheck:
+    tape = cas.load(path)
+    turns = tape.turns()
+    title = str(turns[0].get("user_message") or tape.id)[:140] if turns else tape.id
+    cmp = compare.compare(path, current_py, new_py, label_a="current", label_b="new",
+                          opts=driver.PlayOptions(quiet=True))
+    va, vb = _violations(cmp.a.result), _violations(cmp.b.result)
+    seen = {v.get("rule") for v in va}
+    new_v = [v for v in vb if v.get("rule") not in seen]
+    for ch in cmp.changes:
+        if ch["kind"] == "replay_error":
+            ch["side"] = "new" if ch.get("side") == "new" else "current"
+    reasons = explain(cmp.changes, cmp.a.live, cmp.b.live)
+    for v in new_v:
+        reasons.append(f"Breaks a promise plugins rely on: {v.get('promise') or v.get('rule')}.")
+    broken = bool(new_v) or any(c["kind"] == "replay_error" and c.get("side") == "new" for c in cmp.changes)
+    verdict = "broken" if broken else ("changed" if cmp.changes else "same")
+    row = CassetteCheck(path.name.removesuffix(cas.SUFFIX), title, verdict, reasons, new_v, cmp.changes)
+    row.minor = verdict == "changed" and all(r.startswith(MINOR) for r in reasons)
+    return row
+
+
+def run(to: str = "release", cassettes: list[Path] | None = None, limit: int = 10,
+        progress: Progress = _quiet) -> dict[str, Any]:
+    started = time.time()
+    current_py = sys.executable
+    current = compare.hermes_version(current_py)
+    tapes = cassettes if cassettes is not None else list(cas.iter_dir(runtime.cassette_dir()))[:limit]
+    if not tapes:
+        raise RuntimeError("no recordings yet: turn recording on and use Hermes, then check again")
+    progress({"stage": "resolve", "note": f"finding Hermes {to}"})
+    new_py, label, commit = resolve(to, progress)
+    new = compare.hermes_version(new_py)
+    rows: list[CassetteCheck] = []
+    for i, path in enumerate(tapes, 1):
+        progress({"stage": "replay", "done": i - 1, "total": len(tapes), "cassette": Path(path).name})
+        try:
+            row = check_one(Path(path), current_py, new_py)
+        except Exception as exc:  # one bad cassette must not hide the others
+            row = CassetteCheck(Path(path).name.removesuffix(cas.SUFFIX), Path(path).name, "broken",
+                                [f"Could not replay: {type(exc).__name__}: {exc}"])
+        rows.append(row)
+        progress({"stage": "replay", "done": i, "total": len(tapes), "row": row.__dict__})
+    counts = {v: sum(r.verdict == v for r in rows) for v in ("same", "changed", "broken")}
+    verdict = "broken" if counts["broken"] else ("changed" if counts["changed"] else "safe")
+    minor = verdict == "changed" and all(r.minor for r in rows if r.verdict == "changed")
+    result = {
+        "verdict": verdict, "minor": minor, "target": label, "target_commit": commit, "current": current, "new": new,
+        "counts": counts, "sessions": [r.__dict__ for r in rows],
+        "started": started, "seconds": round(time.time() - started, 1),
+    }
+    out = runtime.data_dir() / "upgrade"
+    out.mkdir(parents=True, exist_ok=True)
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    (out / f"{stamp}--{_safe(label)}.json").write_text(json.dumps(result, indent=2, ensure_ascii=False, default=str), encoding="utf-8")
+    progress({"stage": "done", "result": {k: v for k, v in result.items() if k != "sessions"}})
+    return result
+
+
+def latest_result() -> dict[str, Any] | None:
+    folder = runtime.data_dir() / "upgrade"
+    files = sorted(folder.glob("*.json")) if folder.is_dir() else []
+    return json.loads(files[-1].read_text(encoding="utf-8")) if files else None
+
+
+def render(result: dict[str, Any]) -> str:
+    head = {"safe": "SAFE TO UPDATE", "changed": "REVIEW BEFORE UPDATING", "broken": "DO NOT UPDATE YET"}[result["verdict"]]
+    if result.get("minor"):
+        head = "LOOKS SAFE (WORDING CHANGES ONLY)"
+    c = result["counts"]
+    lines = [f"Ariadne upgrade check  ·  {result['current']}  ->  {result['new']}",
+             f"{head}: {c['same']} same, {c['changed']} changed, {c['broken']} broken  ({result['seconds']} s, offline replays)"]
+    mark = {"same": "=", "changed": "~", "broken": "!"}
+    for s in result["sessions"]:
+        lines.append(f"\n  {mark[s['verdict']]} {s['title'][:90]}")
+        lines.extend(f"      {r}" for r in s["reasons"][:6])
+    return "\n".join(lines)

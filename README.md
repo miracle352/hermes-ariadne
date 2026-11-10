@@ -18,6 +18,30 @@ hermes ariadne record on          # start saving new sessions
 hermes ariadne play latest        # replay the last one offline
 ```
 
+## Safe to update?
+
+Before you update Hermes, check what the new version would do with your own sessions:
+
+```
+hermes ariadne upgrade-check              # the newest Hermes release
+hermes ariadne upgrade-check --to main    # or main, any git ref, or a Hermes python path
+```
+
+Ariadne installs that Hermes into its own data folder (from the Hermes repository and its
+`uv.lock`, using `git` and `uv`), replays your newest recordings on both versions side by side,
+offline, and answers in plain words:
+
+```
+Ariadne upgrade check  ·  v0.23.0  ->  v0.23.1
+SAFE TO UPDATE: 4 same, 0 changed, 0 broken  (114 s, offline replays)
+```
+
+When something changes it says what: tools added or removed, tool arguments changed, different
+instructions, more model calls, a different final reply, or a hook promise that broke. Your own
+Hermes is never touched. In Desktop it is the first tab of the Ariadne page; in chat,
+`/ariadne update` shows the last result. The install step is the only part that uses the
+network (git and the package index); the first check takes a few minutes, later ones reuse it.
+
 ## What you can do with it
 
 **Check an upgrade before you trust it.** Replay your own sessions on a new Hermes build. Same

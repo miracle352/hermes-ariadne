@@ -8,10 +8,11 @@ from typing import Any
 from . import cassette as cas
 from . import runtime
 
-USAGE = ("/ariadne on | off | status | list | last | play [id] | contracts\n"
+USAGE = ("/ariadne on | off | status | list | last | play [id] | update | contracts\n"
          "  on/off    start or stop recording new sessions on this profile\n"
          "  last      summary of the newest cassette\n"
          "  play      replay a cassette offline (default: the newest) and show the verdict\n"
+         "  update    result of the last \"safe to update?\" check\n"
          "  contracts hook-contract problems seen while recording")
 
 
@@ -54,6 +55,12 @@ def handle(raw_args: str = "", **_: Any) -> str:
                 return "No hook-contract problems seen while recording."
             rows = [json.loads(l) for l in path.read_text(encoding="utf-8").splitlines() if l.strip()][-10:]
             return "\n".join(f"{r.get('rule')}: {r.get('promise')}" for r in rows)
+        if sub in ("update", "upgrade"):
+            from . import upgrade
+            last = upgrade.latest_result()
+            if not last:
+                return "No update check yet. Run `hermes ariadne upgrade-check` or use the Ariadne page in Desktop."
+            return upgrade.render(last)
         if sub == "play":
             from . import cli, driver, report
             ref = words[1] if len(words) > 1 else "latest"

@@ -342,3 +342,64 @@ async def job(jid: str):
     if j is None:
         raise HTTPException(404, f"no job {jid}")
     return j.public()
+
+
+# ----------------------------------------------------------------------------- upgrade check
+
+UPGRADE: dict[str, Any] = {"state": "idle"}
+_RELEASE_CACHE: dict[str, Any] = {}
+
+
+@router.get("/upgrade")
+async def upgrade_status():
+    up = _mod("upgrade")
+    return {"job": UPGRADE, "last": up.latest_result()}
+
+
+@router.get("/upgrade/targets")
+async def upgrade_targets():
+    """The Hermes you run now and the newest release (cached for an hour)."""
+    up, cmp = _mod("upgrade"), _mod("compare")
+    if time.time() - _RELEASE_CACHE.get("at", 0) > 3600:
+        try:
+            _RELEASE_CACHE.update(release=up.latest_release(), at=time.time(), error=None)
+        except Exception as exc:  # offline: the page still works with main or a path
+            _RELEASE_CACHE.update(release=None, at=time.time(), error=str(exc)[:200])
+    if "current" not in _RELEASE_CACHE:
+        _RELEASE_CACHE["current"] = cmp.hermes_version(sys.executable)
+    return {"current": _RELEASE_CACHE["current"], "release": _RELEASE_CACHE.get("release"),
+            "error": _RELEASE_CACHE.get("error")}
+
+
+@router.post("/upgrade")
+async def upgrade_start(body: dict):
+    up = _mod("upgrade")
+    with _LOCK:
+        if UPGRADE.get("state") == "running" or any(j.state == "running" for j in JOBS.values()):
+            raise HTTPException(409, "a check or replay is already running")
+        UPGRADE.clear()
+        UPGRADE.update(state="running", started=time.time(), to=str(body.get("to") or "release"),
+                       stage="resolve", note="starting", done=0, total=0, rows=[])
+    limit = int(body.get("limit") or 10)
+
+    def progress(ev: dict[str, Any]) -> None:
+        if ev.get("note"):
+            UPGRADE["note"] = ev["note"]
+        UPGRADE["stage"] = ev.get("stage", UPGRADE.get("stage"))
+        if "total" in ev:
+            UPGRADE["done"], UPGRADE["total"] = ev.get("done", 0), ev["total"]
+        if ev.get("row"):
+            UPGRADE["rows"].append(ev["row"])
+        _broadcast("upgrade.progress", {k: v for k, v in UPGRADE.items()})
+
+    def body_() -> None:
+        try:
+            UPGRADE["result"] = up.run(UPGRADE["to"], None, limit, progress)
+            UPGRADE["state"] = "done"
+        except Exception as exc:  # shown on the page
+            UPGRADE["state"], UPGRADE["error"] = "failed", f"{exc}"
+        UPGRADE["finished"] = time.time()
+        _broadcast("upgrade.finished", {k: v for k, v in UPGRADE.items()})
+
+    threading.Thread(target=body_, name="ariadne-upgrade", daemon=True).start()
+    return UPGRADE

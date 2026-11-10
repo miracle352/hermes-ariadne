@@ -137,6 +137,33 @@ const CSS = `
 .ar-chipbar:hover{color:var(--ui-text-primary);background:var(--chrome-action-hover)}
 .ar-chipbar .ar-dot{width:7px;height:7px}
 .ar-sessmark{display:inline-block;width:10px;height:10px;opacity:.85}
+.ar-up{min-height:0}
+.ar-up-head{display:grid;grid-template-columns:1fr auto;gap:28px;align-items:end}
+.ar-up-q{font-size:clamp(30px,3.6vw,46px);line-height:1;margin:6px 0 10px}
+.ar-up-ctl{display:flex;flex-direction:column;align-items:flex-end;gap:12px}
+.ar-up-vs{display:flex;gap:10px;align-items:center;font-size:13px;color:var(--ui-text-secondary)}
+.ar-up-arrow{color:var(--ui-text-quaternary)}
+.ar-up-run{margin-top:22px}
+.ar-up-err{margin-top:18px;padding:12px 14px;border-radius:12px;border:1px solid color-mix(in srgb,var(--ui-red,#f43) 40%,transparent);color:var(--ui-red,#f43);font-size:13px}
+.ar-up-verdict{margin-top:24px;display:grid;grid-template-columns:auto 1fr;gap:22px;align-items:center;padding:20px 22px;border-radius:16px;border:1px solid var(--ui-stroke-secondary);opacity:0;animation:ar-in .6s cubic-bezier(.2,.8,.2,1) forwards}
+.ar-up-verdict.ok{border-color:color-mix(in srgb,var(--ui-accent) 55%,transparent);background:color-mix(in srgb,var(--ui-accent) 8%,transparent)}
+.ar-up-verdict.warn{border-color:color-mix(in srgb,var(--ui-yellow,#e5b400) 55%,transparent);background:color-mix(in srgb,var(--ui-yellow,#e5b400) 7%,transparent)}
+.ar-up-verdict.bad{border-color:color-mix(in srgb,var(--ui-red,#f43) 55%,transparent);background:color-mix(in srgb,var(--ui-red,#f43) 7%,transparent)}
+.ar-up-word{font-size:clamp(30px,3.4vw,44px);line-height:1;white-space:nowrap}
+.ar-up-verdict.ok .ar-up-word{color:var(--ui-accent)}
+.ar-up-verdict.warn .ar-up-word{color:var(--ui-yellow,#e5b400)}
+.ar-up-verdict.bad .ar-up-word{color:var(--ui-red,#f43)}
+.ar-uprows{margin-top:18px;display:flex;flex-direction:column;gap:8px}
+.ar-uprow{border:1px solid var(--ui-stroke-tertiary);border-radius:12px;padding:12px 14px;opacity:0;animation:ar-in .5s cubic-bezier(.2,.8,.2,1) forwards}
+.ar-uprow-head{display:grid;grid-template-columns:24px 1fr auto;gap:10px;align-items:center;width:100%;background:none;border:0;color:inherit;text-align:left;cursor:pointer;padding:0}
+.ar-uprow-head:disabled{cursor:default}
+.ar-upmark{width:22px;height:22px;border-radius:50%;display:grid;place-items:center;font-size:12px;border:1px solid var(--ui-accent);color:var(--ui-accent)}
+.ar-uprow.changed:not(.minor) .ar-upmark{border-color:var(--ui-yellow,#e5b400);color:var(--ui-yellow,#e5b400)}
+.ar-uprow.broken .ar-upmark{border-color:var(--ui-red,#f43);color:var(--ui-red,#f43)}
+.ar-uptitle{font-size:13.5px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ar-reasons{margin:8px 0 0 34px;padding:0;list-style:none;font-size:12.5px;color:var(--ui-text-secondary);line-height:1.6}
+.ar-reasons li::before{content:'— ';color:var(--ui-text-quaternary)}
+@media (max-width:860px){.ar-up-head{grid-template-columns:1fr}.ar-up-ctl{align-items:flex-start}.ar-up-verdict{grid-template-columns:1fr}}
 @keyframes ar-rise{to{opacity:1;transform:none}}
 @keyframes ar-in{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
 @keyframes ar-bar{to{transform:scaleX(1)}}
@@ -702,6 +729,140 @@ function Contracts() {
   )
 }
 
+
+// --------------------------------------------------------------------------- upgrade check
+
+const shortVersion = v => {
+  const m = String(v || '').match(/v\d+\.\d+\.\d+[^\s]*/)
+  return m ? m[0] : v || '—'
+}
+
+const VERDICT = {
+  safe: { word: 'Safe to update', tone: 'ok', line: 'Every recorded session behaves exactly the same on the new Hermes.' },
+  minor: { word: 'Looks safe', tone: 'ok', line: 'Only wording changed: how Hermes describes some tools or instructs the model.' },
+  changed: { word: 'Review first', tone: 'warn', line: 'The new Hermes handles some of your sessions differently. The details are below.' },
+  broken: { word: 'Don’t update yet', tone: 'bad', line: 'A session failed or a promise plugins rely on broke on the new Hermes.' }
+}
+
+function UpgradeRow({ row, i }) {
+  const [open, setOpen] = useState(false)
+  const diffs = (row.changes || []).filter(c => c.kind === 'model_request').flatMap(c => c.diffs || [])
+  const mark = row.verdict === 'same' ? '=' : row.verdict === 'broken' ? '!' : '~'
+  return h(
+    'div',
+    { className: cn('ar-uprow', row.verdict, row.minor && 'minor'), style: { animationDelay: `${i * 0.05}s` } },
+    h(
+      'button',
+      { className: 'ar-uprow-head', disabled: !diffs.length, onClick: () => setOpen(!open), type: 'button' },
+      h('span', { className: 'ar-upmark ar-mono' }, mark),
+      h('span', { className: 'ar-uptitle' }, short(row.title, 110)),
+      h('span', { className: 'ar-note ar-mono' }, row.verdict === 'same' ? 'same' : row.minor ? 'wording' : row.verdict)
+    ),
+    row.reasons && row.reasons.length > 0 && h('ul', { className: 'ar-reasons' }, row.reasons.map((r, k) => h('li', { key: k }, r))),
+    open && diffs.length > 0 && h(Diff, { diffs })
+  )
+}
+
+function UpgradeCheck() {
+  const qc = useQueryClient()
+  const targets = useQuery({ queryKey: [...KEY, 'upgrade-targets'], queryFn: () => rest('/upgrade/targets'), staleTime: 600000, retry: 1 })
+  const st = useQuery({
+    queryKey: [...KEY, 'upgrade'],
+    queryFn: () => rest('/upgrade'),
+    refetchInterval: q => (q.state.data && q.state.data.job && q.state.data.job.state === 'running' ? 1500 : false)
+  })
+  const [to, setTo] = useState('release')
+  if (st.isError) {
+    return h(BackendDown, { error: st.error })
+  }
+  const t = targets.data || {}
+  const job = (st.data && st.data.job) || {}
+  const running = job.state === 'running'
+  const result = running ? null : job.result || (st.data && st.data.last)
+  const v = result ? (result.minor ? 'minor' : result.verdict) : null
+  const info = v && VERDICT[v]
+  const rows = running ? job.rows || [] : (result && result.sessions) || []
+  const start = async () => {
+    try {
+      await rest('/upgrade', { body: { to }, method: 'POST' })
+      haptic('tap')
+      qc.invalidateQueries({ queryKey: [...KEY, 'upgrade'] })
+    } catch (err) {
+      host.notify({ kind: 'error', message: String(err.message || err) })
+    }
+  }
+  return h(
+    'div',
+    { className: 'ar-panel ar-up' },
+    h(
+      'div',
+      { className: 'ar-up-head' },
+      h(
+        'div',
+        { style: { minWidth: 0 } },
+        h('div', { className: 'ar-eyebrow ar-mono' }, 'Before you update Hermes'),
+        h('div', { className: 'ar-up-q ar-display' }, 'Is it safe to update?'),
+        h(
+          'div',
+          { className: 'ar-sub', style: { fontSize: 14 } },
+          'Ariadne installs the new Hermes in a private folder, replays your own recorded sessions on both versions offline, and tells you what would change. Your Hermes is not touched.'
+        )
+      ),
+      h(
+        'div',
+        { className: 'ar-up-ctl' },
+        h(
+          'div',
+          { className: 'ar-up-vs ar-mono' },
+          h('span', null, shortVersion(t.current)),
+          h('span', { className: 'ar-up-arrow' }, '→'),
+          h('span', { style: { color: 'var(--ui-accent)' } }, to === 'main' ? 'main' : t.release || 'latest release')
+        ),
+        h(SegmentedControl, {
+          onChange: setTo,
+          options: [
+            { id: 'release', label: t.release ? `Release ${t.release}` : 'Latest release' },
+            { id: 'main', label: 'main (newest)' }
+          ],
+          sizing: 'content',
+          value: to
+        }),
+        h(Button, { disabled: running, onClick: start }, running ? 'Checking…' : 'Check my sessions')
+      )
+    ),
+    running &&
+      h(
+        'div',
+        { className: 'ar-up-run' },
+        h('div', { className: 'ar-progress run' }, h('i', { style: { width: `${job.total ? Math.max(6, (job.done / job.total) * 100) : 8}%` } })),
+        h('div', { className: 'ar-note ar-mono' }, job.stage === 'replay' && job.total ? `replaying session ${Math.min(job.done + 1, job.total)} of ${job.total} on both versions` : job.note || 'starting')
+      ),
+    job.state === 'failed' && h('div', { className: 'ar-up-err' }, job.error),
+    info &&
+      h(
+        'div',
+        { className: cn('ar-up-verdict', info.tone), key: result.started },
+        h('div', { className: 'ar-up-word ar-display' }, info.word),
+        h(
+          'div',
+          null,
+          h('div', { style: { fontSize: 15, marginBottom: 6 } }, info.line),
+          h(
+            'div',
+            { className: 'ar-chips', style: { margin: 0 } },
+            h('span', { className: 'ar-chip' }, `${shortVersion(result.current)} → ${shortVersion(result.new)}`),
+            h('span', { className: 'ar-chip' }, h('b', null, result.counts.same), ' same'),
+            h('span', { className: 'ar-chip' }, h('b', null, result.counts.changed), ' changed'),
+            h('span', { className: 'ar-chip' }, h('b', null, result.counts.broken), ' broken'),
+            h('span', { className: 'ar-chip' }, `${result.seconds}s · 0 tokens`)
+          )
+        )
+      ),
+    rows.length > 0 && h('div', { className: 'ar-uprows' }, rows.map((r, i) => h(UpgradeRow, { i, key: r.cassette + i, row: r }))),
+    !running && !result && h('div', { className: 'ar-note', style: { marginTop: 18 } }, 'The first check downloads that Hermes once (a few minutes). Later checks reuse it and take about 20 seconds per session.')
+  )
+}
+
 // --------------------------------------------------------------------------- page
 
 function ThemeButton() {
@@ -718,7 +879,7 @@ function Page() {
   const qc = useQueryClient()
   const status = useStatus()
   const s = status.data || {}
-  const [tab, setTab] = useState('library')
+  const [tab, setTab] = useState('upgrade')
   const ran = useQuery({ queryKey: [...KEY, 'runs'], queryFn: () => rest('/runs') })
   const runs = (ran.data && ran.data.runs) || []
   const identical = runs.filter(r => r.verdict === 'identical').length
@@ -769,6 +930,7 @@ function Page() {
         h(SegmentedControl, {
           onChange: setTab,
           options: [
+            { id: 'upgrade', label: 'Safe to update?' },
             { id: 'library', label: 'Library' },
             { id: 'runs', label: 'Replays' },
             { id: 'contracts', label: 'Contracts' }
@@ -778,7 +940,7 @@ function Page() {
         }),
         h('span', { className: 'ar-note ar-mono' }, s.version ? `ariadne ${s.version}` : '')
       ),
-      status.isError ? h(BackendDown, { error: status.error }) : tab === 'library' ? h(Library) : tab === 'runs' ? h(Runs) : h(Contracts)
+      status.isError ? h(BackendDown, { error: status.error }) : tab === 'upgrade' ? h(UpgradeCheck) : tab === 'library' ? h(Library) : tab === 'runs' ? h(Runs) : h(Contracts)
     )
   )
 }

@@ -72,6 +72,13 @@ def setup_argparse(parser: argparse.ArgumentParser) -> None:
     ex.add_argument("--prefer", choices=["forked", "original"], default="forked", help="Which side of a pair is preferred")
     ex.add_argument("--out", help="Append the JSON line to this file (default: print it)")
 
+    up = subs.add_parser("upgrade-check", help="Replay your recordings on a newer Hermes before you update")
+    up.add_argument("--to", default="release",
+                    help="release (default: the newest Hermes release), main, a git ref, or a Hermes python/venv path")
+    up.add_argument("--cassette", action="append", default=None, help="Check only this cassette (repeatable)")
+    up.add_argument("--limit", type=int, default=10, help="How many of your newest recordings to check (default 10)")
+    up.add_argument("--json", action="store_true")
+
     parser.set_defaults(func=handle)
 
 
@@ -121,6 +128,8 @@ def handle(args: argparse.Namespace) -> int:
         return _cmd_fork(args)
     if cmd == "export":
         return _cmd_export(args)
+    if cmd == "upgrade-check":
+        return _cmd_upgrade(args)
     print("usage: hermes ariadne {record,list,show,play} ...")
     return 2
 
@@ -222,6 +231,23 @@ def _cmd_fork(args: argparse.Namespace) -> int:
         return 2
     print(json.dumps(r.to_json(), indent=2, ensure_ascii=False) if args.json else fork.render(r))
     return 0 if r.prefix_identical and not r.errors else 1
+
+
+def _cmd_upgrade(args: argparse.Namespace) -> int:
+    from . import upgrade
+    tapes = [resolve(c) for c in args.cassette] if args.cassette else None
+
+    def say(ev: dict[str, Any]) -> None:
+        if args.json:
+            return
+        if ev.get("note"):
+            print(f"· {ev['note']}", flush=True)
+        elif ev.get("stage") == "replay" and "row" not in ev:
+            print(f"· replaying {ev['done'] + 1}/{ev['total']}  {ev.get('cassette', '')}", flush=True)
+
+    result = upgrade.run(args.to, tapes, args.limit, say)
+    print(json.dumps(result, indent=2, default=str) if args.json else "\n" + upgrade.render(result))
+    return {"safe": 0, "changed": 1, "broken": 2}[result["verdict"]]
 
 
 def _cmd_export(args: argparse.Namespace) -> int:

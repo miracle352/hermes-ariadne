@@ -166,3 +166,17 @@ def test_replay_config_drops_settings_that_run_things():
     assert set(kept) == {"skills", "compression", "toolsets"} and kept["skills"] == {"auto_load": ["a"]}
     assert {"hooks", "hooks_auto_accept", "mcp_servers", "terminal", "auxiliary", "skills.*"} <= set(dropped)
     assert util.replay_settings(cfg, trust=True)[0] == cfg
+
+
+def test_upgrade_picks_the_release_tag_and_explains_tool_changes():
+    up = importlib.import_module(f"{pkg}.upgrade")
+    tags = "\n".join(f"abc\trefs/tags/{t}" for t in ["v0.22.9", "v0.23.1", "v2026.9.24", "v0.23.2-rc.1", "v0.23.1+canary.1"])
+    assert up.pick_release(tags) == "v0.23.1"
+    changes = [{"kind": "model_request", "sections": ["tools"], "diffs": [
+        {"path": ".tools.delegate_task.description", "change": "changed"},
+        {"path": ".tools.patch.parameters.properties.mode", "change": "added"},
+        {"path": ".tools.web_fetch", "change": "added"}]}]
+    out = up.explain(changes, [], [])
+    assert "Gives the model new tools: web_fetch." in out
+    assert "Changes the arguments of: patch." in out
+    assert "Rewords how it describes: delegate_task." in out
