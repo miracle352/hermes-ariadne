@@ -681,7 +681,8 @@ code,.card div{overflow-wrap:anywhere}
   fetch('https://raw.githubusercontent.com/miracle352/hermes-ariadne/compat-data/compat.json', { cache: 'no-store' })
     .then(r => r.ok ? r.json() : Promise.reject(r.status))
     .then(data => {
-      const runs = data.runs || []
+      const rank = h => h === 'main' ? 1e9 : h.replace(/^v/, '').split('.').reduce((a, n) => a * 1000 + (+n || 0), 0)
+      const runs = (data.runs || []).slice().sort((a, b) => rank(a.hermes) - rank(b.hermes))
       const names = [...new Set(runs.flatMap(r => r.plugins.map(p => p.plugin)))].sort()
       const cell = (run, n) => run.plugins.find(p => p.plugin === n)
       const ok = runs.map(r => r.plugins.filter(p => p.status === 'ok').length)
