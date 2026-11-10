@@ -81,6 +81,22 @@ def _venv_python(venv: Path) -> Path:
     return venv / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
 
 
+def _rmtree(path: Path) -> None:
+    """Delete a folder git wrote. On Windows git marks its object files read-only, which makes a
+    plain rmtree fail, so clear the flag and retry each file."""
+    import stat
+
+    def again(func, target, _exc):
+        os.chmod(target, stat.S_IWRITE)
+        func(target)
+
+    if path.exists():
+        if sys.version_info >= (3, 12):
+            shutil.rmtree(path, onexc=again)
+        else:  # pragma: no cover
+            shutil.rmtree(path, onerror=again)
+
+
 def _safe(ref: str) -> str:
     return re.sub(r"[^A-Za-z0-9._-]+", "_", ref)[:60]
 
@@ -100,9 +116,8 @@ def install(ref: str, progress: Progress = _quiet, max_age_hours: float = 6.0) -
     uv = find_uv()
     if not uv:
         raise RuntimeError("uv was not found. Install uv (https://docs.astral.sh/uv/) or point --to at a Hermes python")
-    if root.exists():
-        shutil.rmtree(root, ignore_errors=True)
-    root.mkdir(parents=True)
+    _rmtree(root)
+    root.mkdir(parents=True, exist_ok=True)
     progress({"stage": "install", "note": f"downloading Hermes {ref}"})
     # Releases carry their version; main and other refs work it out from the release tags with
     # `git describe`, so they need history and tags (commits only: --filter=tree:0), not depth 1.

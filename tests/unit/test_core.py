@@ -220,3 +220,15 @@ def test_upgrade_titles_skip_system_notes_and_empty_recordings(tmp_path):
     assert up.session_title(Tape(["[System note: first time opening the app. Run [onboarding].]\n\nhi there"])) == "hi there"
     assert up.session_title(Tape(["[System note: first time.]"])) == "First-run onboarding"
     assert up.session_title(Tape([])) == "20261107-x"
+
+
+def test_upgrade_can_delete_read_only_git_files(tmp_path):
+    import os, stat
+    up = importlib.import_module(f"{pkg}.upgrade")
+    f = tmp_path / "old" / ".git" / "objects" / "pack" / "x.pack"
+    f.parent.mkdir(parents=True)
+    f.write_text("x")
+    os.chmod(f, stat.S_IREAD)
+    os.chmod(f.parent, stat.S_IREAD | stat.S_IEXEC)  # also blocks deletion on Linux, like Windows read-only
+    up._rmtree(tmp_path / "old")
+    assert not (tmp_path / "old").exists()
