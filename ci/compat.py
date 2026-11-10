@@ -72,7 +72,7 @@ def validate(python: str, plugin: Path) -> tuple[bool, str]:
         env["HERMES_HOME"] = home
         r = _run([python, "-m", "hermes_cli.main", "plugins", "validate", str(plugin)], env=env, cwd=home, timeout=300)
         text = (r.stdout + r.stderr).strip()
-        return r.returncode == 0, "\n".join(text.splitlines()[-6:])[-500:]
+        return r.returncode == 0, "\n".join(text.splitlines()[-40:])[-4000:]
     finally:
         shutil.rmtree(home, ignore_errors=True)
 
@@ -94,7 +94,9 @@ def check(python: str, src: Path, name: str, work: Path) -> dict:
     row["validate"] = "pass" if ok else "fail"
     if not ok:
         row["status"] = "fail"
-        row["notes"].append("hermes plugins validate failed: " + out.splitlines()[-1][:200] if out else "validate failed")
+        row["validate_output"] = out
+        why = [l.strip() for l in out.splitlines() if l.strip() and any(k in l.lower() for k in ("error", "fail", "✗", "rule", "missing", "not "))]
+        row["notes"].append("hermes plugins validate failed: " + (why[0] if why else out.splitlines()[-1] if out else "")[:300])
     problems, violations, errors = [], [], []
     for cid in CASSETTES:
         tape = HERE / "tests" / "cassettes" / f"{cid}.cassette.jsonl"
@@ -116,7 +118,7 @@ def check(python: str, src: Path, name: str, work: Path) -> dict:
         if p["kind"] == "plugin_load_failed":
             row["notes"].append(f"does not load: {(g[1] if len(g) > 1 else '')[:200]}")
         elif p["kind"] == "plugin_hook_raised":
-            row["notes"].append(f"hook {g[0]} ({g[1]}) raised: {(g[2] if len(g) > 2 else '')[:160]}")
+            row["notes"].append(f"hook {g[0]} ({g[1]}) raised: {(g[2] if len(g) > 2 else '')[:500]}")
         else:
             row["notes"].append(f"hook {g[0]} ({g[1]}) timed out")
     if problems or errors:
@@ -138,7 +140,8 @@ def main() -> int:
     ap.add_argument("--only", action="append", default=[])
     ap.add_argument("--out", required=True)
     args = ap.parse_args()
-    names = args.only or [l.split("#")[0].strip() for l in Path(args.plugins).read_text().splitlines() if l.split("#")[0].strip()]
+    only = [n.strip() for o in args.only for n in o.split(",") if n.strip()]
+    names = only or [l.split("#")[0].strip() for l in Path(args.plugins).read_text().splitlines() if l.split("#")[0].strip()]
     src = Path(args.hermes_src)
     commit = _run(["git", "-C", str(src), "rev-parse", "HEAD"]).stdout.strip()
     rows = []
@@ -147,7 +150,9 @@ def main() -> int:
             t = time.time()
             row = check(args.hermes_python, Path(args.catalog) if args.catalog else src, name, Path(work))
             row["seconds"] = round(time.time() - t, 1)
-            print(f"{row['status']:<8} {name:<28} {'; '.join(row['notes'])[:160]}", flush=True)
+            print(f"{row['status']:<8} {name:<28} {'; '.join(row['notes'])[:600]}", flush=True)
+            if row.get("validate_output"):
+                print(row["validate_output"], flush=True)
             rows.append(row)
     out = {"hermes": args.label, "commit": commit, "checked": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
            "plugins": rows}

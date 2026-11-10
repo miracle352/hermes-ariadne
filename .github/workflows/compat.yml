@@ -5,6 +5,10 @@ name: plugin-compat
 # Plugin code runs only here, on a throwaway GitHub runner, inside scratch Hermes homes.
 on:
   workflow_dispatch:
+    inputs:
+      only:
+        description: "Comma-separated plugin names to check (empty: all in ci/compat-plugins.txt)"
+        default: ""
 
 permissions:
   contents: read
@@ -36,11 +40,12 @@ jobs:
         env:
           HERMES_REF: ${{ matrix.hermes-ref }}
           HERMES_HOME: ${{ runner.temp }}/compat-home
+          ONLY: ${{ inputs.only }}
         run: |
           python3 -m pip install --quiet pyyaml
           python3 ci/compat.py --hermes-python "$RUNNER_TEMP/hermes-venv/bin/python" \
             --hermes-src "$RUNNER_TEMP/hermes-agent" --catalog "$RUNNER_TEMP/catalog" \
-            --label "$HERMES_REF" --out "compat-out/$HERMES_REF.json"
+            --label "$HERMES_REF" ${ONLY:+--only "$ONLY"} --out "compat-out/$HERMES_REF.json"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
         with:
           name: compat-${{ matrix.hermes-ref }}
@@ -61,9 +66,19 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
         run: |
+          curl -fsSL "https://raw.githubusercontent.com/$REPO/compat-data/compat.json" -o previous.json || echo '{"runs": []}' > previous.json
           python3 - <<'EOF'
           import glob, json, time
-          runs = [json.load(open(f)) for f in sorted(glob.glob("parts/*.json"))]
+          prev = {r["hermes"]: r for r in json.load(open("previous.json")).get("runs", [])}
+          for f in sorted(glob.glob("parts/*.json")):
+              run = json.load(open(f))
+              old = prev.get(run["hermes"])
+              if old and len(run["plugins"]) < len(old["plugins"]):  # a partial re-check: replace only those rows
+                  fresh = {p["plugin"]: p for p in run["plugins"]}
+                  run["plugins"] = [fresh.pop(p["plugin"], p) for p in old["plugins"]] + list(fresh.values())
+              prev[run["hermes"]] = run
+          order = {"v0.23.0": 0, "v0.23.1": 1, "main": 99}
+          runs = sorted(prev.values(), key=lambda r: (order.get(r["hermes"], 50), r["hermes"]))
           json.dump({"generated": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "runs": runs},
                     open("compat.json", "w"), indent=2)
           EOF
