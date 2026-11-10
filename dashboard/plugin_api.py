@@ -19,6 +19,10 @@ from fastapi import APIRouter, HTTPException
 
 router = APIRouter()
 
+# Bumped whenever the routes the Desktop page needs change, so the page can tell a backend that
+# is still running old code (the plugin updated, the backend did not restart) from a missing one.
+API_VERSION = 2
+
 PKG_DIR = Path(__file__).resolve().parent.parent
 
 
@@ -110,7 +114,7 @@ async def status():
         "recording": mode == "record", "mode": mode, "cassettes": len(cassettes),
         "runs": len(list((rt.data_dir() / "runs").glob("*/summary.json"))),
         "contract_violations": len(_violations()),
-        "data_dir": str(rt.data_dir()), "version": rt._plugin_version(),
+        "data_dir": str(rt.data_dir()), "version": rt._plugin_version(), "api": API_VERSION,
         "jobs": [j.public() for j in JOBS.values() if j.state == "running"],
     }
 

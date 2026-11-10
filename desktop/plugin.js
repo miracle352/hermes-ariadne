@@ -359,6 +359,7 @@ const fmtVal = v => (v === undefined ? '∅' : typeof v === 'string' ? v : JSON.
 // --------------------------------------------------------------------------- data
 
 const KEY = ['plugin:ariadne']
+const API_VERSION = 2 // must match dashboard/plugin_api.py
 const useStatus = () => useQuery({ queryKey: [...KEY, 'status'], queryFn: () => rest('/status'), refetchInterval: 10000, retry: 1 })
 const useCassettes = () => useQuery({ queryKey: [...KEY, 'cassettes'], queryFn: () => rest('/cassettes'), refetchInterval: 15000, retry: 1 })
 
@@ -379,6 +380,23 @@ async function startJob(kind, body) {
     host.notifyError ? host.notifyError(String(err.message || err)) : host.notify({ kind: 'error', message: String(err) })
     return null
   }
+}
+
+function BackendStale({ have }) {
+  return h(
+    'div',
+    { className: 'ar-panel', style: { minHeight: 0 } },
+    h('div', { className: 'ar-eyebrow ar-mono' }, 'Restart needed'),
+    h('div', { className: 'ar-h2 ar-display', style: { margin: '6px 0 10px' } }, 'Ariadne updated, but Hermes is still running the old version'),
+    h(
+      'div',
+      { className: 'ar-note', style: { fontSize: 13, lineHeight: 1.6 } },
+      'The page is new; the Python half in the Hermes backend was loaded before the update. Run ',
+      h('code', { className: 'ar-mono' }, 'hermes dashboard --stop'),
+      ' in a terminal, then quit Hermes Desktop completely (including its tray icon) and open it again.'
+    ),
+    h('div', { className: 'ar-note ar-mono', style: { marginTop: 10, opacity: 0.7 } }, `backend api ${have || 1}, page needs ${API_VERSION}`)
+  )
 }
 
 function BackendDown({ error }) {
@@ -940,7 +958,7 @@ function Page() {
         }),
         h('span', { className: 'ar-note ar-mono' }, s.version ? `ariadne ${s.version}` : '')
       ),
-      status.isError ? h(BackendDown, { error: status.error }) : tab === 'upgrade' ? h(UpgradeCheck) : tab === 'library' ? h(Library) : tab === 'runs' ? h(Runs) : h(Contracts)
+      status.isError ? h(BackendDown, { error: status.error }) : status.data && (status.data.api || 1) < API_VERSION ? h(BackendStale, { have: status.data.api }) : tab === 'upgrade' ? h(UpgradeCheck) : tab === 'library' ? h(Library) : tab === 'runs' ? h(Runs) : h(Contracts)
     )
   )
 }
