@@ -34,6 +34,8 @@ def setup_argparse(parser: argparse.ArgumentParser) -> None:
     play.add_argument("--surface", choices=["desktop", "tui"], default=None, help="Surface to replay as (default: recorded)")
     play.add_argument("--with-plugin", action="append", default=[], metavar="DIR",
                       help="Also load this plugin directory in the replay (repeatable), e.g. the plugin under test")
+    play.add_argument("--trust-config", action="store_true",
+                      help="Replay every recorded setting, including hooks, MCP servers and terminal (only for cassettes you made)")
     play.add_argument("--no-clone", action="store_true",
                       help="Do not copy this profile's skills, memories, SOUL.md and config (never credentials) into the replay")
 
@@ -179,7 +181,7 @@ def _cmd_play(args: argparse.Namespace) -> int:
     result = driver.play(path, driver.PlayOptions(
         hermes_python=args.hermes_python, keep=args.keep, turn_timeout=args.timeout,
         provider=args.provider, surface=args.surface, extra_plugins=args.with_plugin,
-        clone_home=None if args.no_clone else runtime.hermes_home()))
+        clone_home=None if args.no_clone else runtime.hermes_home(), trust_config=args.trust_config))
     if args.json:
         print((result.run_dir / "summary.json").read_text(encoding="utf-8"))
     else:

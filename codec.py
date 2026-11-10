@@ -71,11 +71,24 @@ def encode(obj: Any, _depth: int = 0, _lossy: list | None = None) -> Any:
     return {"$repr": repr(obj)}
 
 
+# A cassette can come from anyone, so decoding never imports a module it names unless the
+# module is one of the SDKs whose response types Hermes reads. Anything else decodes to an
+# attribute tree, which is what Hermes's getattr-based readers need anyway.
+ALLOWED_MODEL_MODULES = ("openai.types.", "anthropic.types.", "google.genai.types", "mistralai.models.")
+
+
 def _import(path: str) -> Any:
     module, _, qual = path.partition(":")
+    if not module.startswith(ALLOWED_MODEL_MODULES) or not qual or not qual.replace(".", "").replace("_", "").isalnum():
+        raise ImportError(f"not an allowed model type: {path}")
     target: Any = importlib.import_module(module)
     for part in qual.split("."):
+        if part.startswith("_"):
+            raise ImportError(f"private attribute in {path}")
         target = getattr(target, part)
+    from pydantic import BaseModel
+    if not (isinstance(target, type) and issubclass(target, BaseModel)):
+        raise ImportError(f"not a pydantic model: {path}")
     return target
 
 

@@ -143,3 +143,26 @@ def test_skills_section_presence_is_environment():
     lc2, le2 = split_environment([skilled[0].replace("scan the skills", "read the skills")])
     a, b = settle_skills(*split_environment(skilled), lc2, le2)
     assert a != b
+
+
+def test_decode_never_imports_modules_a_cassette_names():
+    sys.modules.pop("this", None)                            # stdlib module with an import side effect
+    out = codec.decode({"$pyd": "this:s", "data": {"a": 1}})
+    assert "this" not in sys.modules                         # never imported
+    assert out.a == 1                                        # decoded as an attribute tree
+    usage = codec.decode({"$pyd": "openai.types.completion_usage:CompletionUsage",
+                          "data": {"prompt_tokens": 1, "completion_tokens": 2, "total_tokens": 3}})
+    assert usage.total_tokens == 3
+
+
+def test_replay_config_drops_settings_that_run_things():
+    util = importlib.import_module(f"{pkg}.util")
+    cfg = {"hooks": {"pre_tool_call": [{"command": "curl evil"}]}, "hooks_auto_accept": True,
+           "mcp_servers": {"x": {"command": "sh"}}, "terminal": {"backend": "ssh"},
+           "auxiliary": {"compression": {"base_url": "http://127.0.0.1:1"}},
+           "skills": {"inline_shell": True, "auto_load": ["a"]}, "compression": {"threshold": 0.5},
+           "toolsets": ["hermes-cli"]}
+    kept, dropped = util.replay_settings(cfg)
+    assert set(kept) == {"skills", "compression", "toolsets"} and kept["skills"] == {"auto_load": ["a"]}
+    assert {"hooks", "hooks_auto_accept", "mcp_servers", "terminal", "auxiliary", "skills.*"} <= set(dropped)
+    assert util.replay_settings(cfg, trust=True)[0] == cfg

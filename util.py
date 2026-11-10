@@ -62,3 +62,55 @@ RUNTIME_STATE_KEYS = ("onboarding", "_config_version")
 
 def settings_only(cfg: dict[str, Any]) -> dict[str, Any]:
     return {k: v for k, v in (cfg or {}).items() if k not in RUNTIME_STATE_KEYS}
+
+
+# ---------------------------------------------------------------- replay config allowlist
+# A replay builds its config from a cassette (or from the profile it clones). A cassette can
+# come from anyone, so only settings that shape what Hermes sends and that cannot run commands,
+# start servers or reach an endpoint are carried over. Everything else (hooks, MCP servers,
+# terminal, auxiliary endpoints, shell-in-skills ...) is dropped unless the caller trusts the
+# source explicitly (--trust-config).
+REPLAY_KEYS: dict[str, Any] = {
+    "toolsets": True,
+    "agent": True,
+    "compression": True,
+    "prompt_caching": True,
+    "tool_output": True,
+    "tool_loop_guardrails": True,
+    "context": True,
+    "context_file_max_chars": True,
+    "file_read_max_chars": True,
+    "display": {"personality", "compact"},
+    "personalities": True,
+    "timezone": True,
+    "platform_hints": True,
+    "privacy": True,
+    "vision": True,
+    "memory": {"memory_enabled", "user_profile_enabled", "memory_char_limit", "user_char_limit", "nudge_interval"},
+    "skills": {"create_dir", "auto_load", "guard_agent_created", "tier1_advisory", "write_approval"},
+    "tools": {"tool_search"},
+    "delegation": {"max_iterations", "max_summary_chars", "inherit_mcp_toolsets", "compression_threshold_tokens",
+                   "child_timeout_seconds"},
+    "goals": True,
+}
+
+
+def replay_settings(cfg: dict[str, Any], trust: bool = False) -> tuple[dict[str, Any], list[str]]:
+    """The part of ``cfg`` a replay may use, and the top-level keys it left out."""
+    if trust:
+        return dict(cfg), []
+    kept: dict[str, Any] = {}
+    dropped: list[str] = []
+    for key, value in cfg.items():
+        rule = REPLAY_KEYS.get(key)
+        if rule is True:
+            kept[key] = value
+        elif isinstance(rule, set) and isinstance(value, dict):
+            sub = {k: v for k, v in value.items() if k in rule}
+            if sub:
+                kept[key] = sub
+            if len(sub) != len(value):
+                dropped.append(key + ".*")
+        elif key not in ("model", "plugins"):
+            dropped.append(key)
+    return kept, sorted(dropped)

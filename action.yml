@@ -28,24 +28,33 @@ runs:
     - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2  # v10.3.3
       with:
         python-version: ${{ inputs.python-version }}
-    - name: Install Hermes ${{ inputs.hermes-ref }}
+    - name: Install Hermes
       shell: bash
+      env:
+        HERMES_REF: ${{ inputs.hermes-ref }}
+        HERMES_EXTRAS: ${{ inputs.hermes-extras }}
+        PY_VERSION: ${{ inputs.python-version }}
       run: |
-        git clone --quiet --depth 1 --branch "${{ inputs.hermes-ref }}" https://github.com/NousResearch/hermes-agent.git "$RUNNER_TEMP/hermes-agent" \
-          || { git clone --quiet https://github.com/NousResearch/hermes-agent.git "$RUNNER_TEMP/hermes-agent" && git -C "$RUNNER_TEMP/hermes-agent" checkout --quiet "${{ inputs.hermes-ref }}"; }
+        git clone --quiet --depth 1 --branch "$HERMES_REF" https://github.com/NousResearch/hermes-agent.git "$RUNNER_TEMP/hermes-agent" \
+          || { git clone --quiet https://github.com/NousResearch/hermes-agent.git "$RUNNER_TEMP/hermes-agent" && git -C "$RUNNER_TEMP/hermes-agent" checkout --quiet "$HERMES_REF"; }
         # Install exactly what Hermes's uv.lock pins (a fresh resolution can pick conflicting versions).
         EXTRA_ARGS=()
-        IFS=',' read -ra EXTRAS <<< "${{ inputs.hermes-extras }}"
+        IFS=',' read -ra EXTRAS <<< "$HERMES_EXTRAS"
         for e in "${EXTRAS[@]}"; do [ -n "$e" ] && EXTRA_ARGS+=(--extra "$e"); done
         (cd "$RUNNER_TEMP/hermes-agent" && uv export --quiet --frozen --no-hashes --no-emit-project "${EXTRA_ARGS[@]}" -o "$RUNNER_TEMP/hermes-requirements.txt")
-        uv venv --quiet "$RUNNER_TEMP/hermes-venv" --python "${{ inputs.python-version }}"
+        uv venv --quiet "$RUNNER_TEMP/hermes-venv" --python "$PY_VERSION"
         VIRTUAL_ENV="$RUNNER_TEMP/hermes-venv" uv pip install --quiet --no-deps -r "$RUNNER_TEMP/hermes-requirements.txt"
         VIRTUAL_ENV="$RUNNER_TEMP/hermes-venv" uv pip install --quiet --no-deps -e "$RUNNER_TEMP/hermes-agent"
     - name: Replay cassettes
       shell: bash
+      env:
+        PLUGIN_PATH: ${{ inputs.plugin-path }}
+        CASSETTES: ${{ inputs.cassettes }}
+        FAIL_ON: ${{ inputs.fail-on }}
+        ACTION_PATH: ${{ github.action_path }}
       run: |
         PLUGIN_ARGS=()
-        if [ -n "${{ inputs.plugin-path }}" ]; then PLUGIN_ARGS=(--plugin "${{ inputs.plugin-path }}"); fi
-        python3 "${{ github.action_path }}/ci/run_cassettes.py" \
+        if [ -n "$PLUGIN_PATH" ]; then PLUGIN_ARGS=(--plugin "$PLUGIN_PATH"); fi
+        python3 "$ACTION_PATH/ci/run_cassettes.py" \
           --hermes-python "$RUNNER_TEMP/hermes-venv/bin/python" \
-          --glob "${{ inputs.cassettes }}" --fail-on "${{ inputs.fail-on }}" "${PLUGIN_ARGS[@]}"
+          --glob "$CASSETTES" --fail-on "$FAIL_ON" "${PLUGIN_ARGS[@]}"

@@ -49,6 +49,7 @@ class PlayOptions:
     surface: str | None = None         # None = recorded platform (desktop / tui)
     clone_home: str | None = None      # copy non-secret context (config, SOUL.md, memories, skills) from this home
     extra_plugins: list[str] = field(default_factory=list)  # plugin dirs to load next to Ariadne (e.g. the plugin under test)
+    trust_config: bool = False         # keep every recorded/cloned setting (hooks, MCP servers, terminal ...)
 
 
 @dataclass
@@ -161,14 +162,17 @@ def clone_context(src: Path, dst: Path) -> None:
         (dst / "config.yaml").write_text(json.dumps(cfg, indent=2, default=str), encoding="utf-8")
 
 
-def _scratch_config(tape: cas.Cassette, stub_port: int, provider: str | None = None, existing: Path | None = None) -> str:
+def _scratch_config(tape: cas.Cassette, stub_port: int, provider: str | None = None, existing: Path | None = None,
+                    trust: bool = False, plugins_enabled: list[str] | None = None) -> tuple[str, list[str]]:
+    from .util import replay_settings
     h = tape.header
     model = h.get("model") or "ariadne-replay"
     provider = provider or "custom"
     snap = _read_yaml(existing) if existing else {}
     if not snap and isinstance(h.get("config_snapshot"), dict):
         snap = h["config_snapshot"]
-    cfg: dict[str, Any] = {k: v for k, v in snap.items() if k not in ("model", "providers", "custom_providers", "fallback_providers", "fallback_model")}
+    cfg, dropped = replay_settings({k: v for k, v in snap.items()
+                                    if k not in ("providers", "custom_providers", "fallback_providers", "fallback_model")}, trust)
     recorded_model = snap.get("model") if isinstance(snap.get("model"), dict) else {}
     cfg["model"] = {**{k: v for k, v in recorded_model.items() if k not in ("provider", "base_url", "api_key", "api_mode", "default", "model")},
                     "provider": provider, "model": model, "base_url": f"http://127.0.0.1:{stub_port}/v1",
@@ -178,14 +182,17 @@ def _scratch_config(tape: cas.Cassette, stub_port: int, provider: str | None = N
     api_mode = next((e.get("api_mode") for e in tape.of("llm") if e.get("api_mode")), None) or h.get("api_mode")
     if api_mode and api_mode != "chat_completions":
         cfg["model"]["api_mode"] = api_mode
-    plugins = cfg.get("plugins") if isinstance(cfg.get("plugins"), dict) else {}
-    enabled = [p for p in (plugins.get("enabled") or []) if isinstance(p, str)]
-    cfg["plugins"] = {**plugins, "enabled": sorted(set(enabled) | {"ariadne"}), "disabled": []}
+    # Only Ariadne and the plugins the caller named load; a recorded plugin list is a hint, not a grant.
+    recorded = snap.get("plugins") if isinstance(snap.get("plugins"), dict) else {}
+    enabled = set(plugins_enabled or [])
+    if trust:
+        enabled |= {p for p in (recorded.get("enabled") or []) if isinstance(p, str)}
+    cfg["plugins"] = {"enabled": sorted(enabled | {"ariadne"}), "disabled": []}
     try:
         import yaml  # type: ignore
-        return yaml.safe_dump(cfg, sort_keys=False)
+        return yaml.safe_dump(cfg, sort_keys=False), dropped
     except Exception:
-        return json.dumps(cfg, indent=2)  # JSON is valid YAML
+        return json.dumps(cfg, indent=2), dropped  # JSON is valid YAML
 
 
 def _read_yaml_text(text: str) -> dict[str, Any]:
@@ -267,12 +274,12 @@ def play(cassette_path: str | Path, opts: PlayOptions | None = None) -> PlayResu
     provider = opts.provider or "custom"
     if opts.clone_home:
         clone_context(Path(opts.clone_home), scratch)
-    cfg_text = _scratch_config(tape, port, provider, scratch / "config.yaml")
-    if opts.extra_plugins:
-        cfg = json.loads(cfg_text) if cfg_text.lstrip().startswith("{") else _read_yaml_text(cfg_text)
-        names = [_plugin_name(Path(p).resolve()) for p in opts.extra_plugins]
-        cfg.setdefault("plugins", {})["enabled"] = sorted(set(cfg["plugins"].get("enabled") or []) | set(names) | {"ariadne"})
-        cfg_text = json.dumps(cfg, indent=2, default=str)
+    names = [_plugin_name(Path(p).resolve()) for p in opts.extra_plugins]
+    cfg_text, dropped = _scratch_config(tape, port, provider, scratch / "config.yaml",
+                                        trust=opts.trust_config, plugins_enabled=names)
+    if dropped:
+        emit("config_dropped", {"keys": dropped,
+                                "note": "settings that can run commands or reach endpoints are not replayed; pass --trust-config to keep them"})
     (scratch / "config.yaml").write_text(cfg_text, encoding="utf-8")
     env = _child_env(scratch, opts)
     surface = opts.surface or tape.header.get("platform") or "tui"

@@ -131,6 +131,16 @@ separately too.
 - **`bisect` checks out commits** in the Hermes checkout you point it at. It refuses to start on a
   dirty tree and puts the original commit back when it finishes.
 
+- **Replays only use safe settings.** A cassette's config (or the profile it clones) is filtered
+  through an allowlist of settings that shape the request: toolsets, compression, agent limits,
+  personality, memory limits and similar. Hooks, MCP servers, the terminal backend, auxiliary
+  endpoints, shell in skills and every other setting that can run something or reach an endpoint
+  are dropped, and the report lists what was left out. Only Ariadne and plugins you pass with
+  `--with-plugin` load. `--trust-config` keeps everything, for cassettes you recorded yourself.
+- **Decoding never imports what a cassette names.** Response objects are rebuilt only from the
+  model SDKs Hermes reads (`openai.types`, `anthropic.types`, ...) and only as pydantic models;
+  anything else becomes a plain attribute tree.
+
 ## How it compares
 
 - **OrcaReplay** records at the network edge: it intercepts Hermes's TLS and serves the same bytes back. That works without touching Hermes, but it can't tell what Hermes meant to send, so any change to the prompt is just a byte mismatch. Its fork onto another model doesn't work on Hermes yet. Ariadne runs inside Hermes through the plugin middleware, so it can separate your machine's setup from real Hermes changes, check the hook contracts, bisect Hermes commits, and fork from any turn.
