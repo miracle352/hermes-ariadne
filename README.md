@@ -42,6 +42,8 @@ Hermes is never touched. In Desktop it is the first tab of the Ariadne page; in 
 `/ariadne update` shows the last result. The install step is the only part that uses the
 network (git and the package index); the first check takes a few minutes, later ones reuse it.
 
+![The upgrade check in Hermes Desktop](docs/screenshots/upgrade.png)
+
 ## What you can do with it
 
 **Check an upgrade before you trust it.** Replay your own sessions on a new Hermes build. Same
@@ -196,6 +198,13 @@ Record a few sessions with your plugin enabled, commit the cassettes, and add:
 It installs Hermes at `hermes-ref` from its lock file, loads your plugin next to Ariadne, replays
 every cassette offline and writes a table to the run summary. `fail-on: contract` fails only on
 broken hook contracts, which is useful against `main`.
+
+## Plugin compatibility
+
+`ci/compat.py` checks real catalog plugins (listed in `ci/compat-plugins.txt`) against Hermes
+releases and main: each is fetched at the commit the catalog pins, validated, and loaded into
+offline replays, and any load failure or crashing hook is recorded. The `plugin-compat`
+workflow runs it on GitHub's runners and the site shows the table.
 
 ## Tests
 
