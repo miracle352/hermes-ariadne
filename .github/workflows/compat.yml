@@ -1,0 +1,76 @@
+name: plugin-compat
+# Do real catalog plugins still work on Hermes releases and main? Each plugin is fetched at the
+# commit the Hermes catalog pins, validated with the Hermes under test, and loaded into offline
+# replays of Ariadne's cassettes. Results go to the compat-data branch; the site reads them.
+# Plugin code runs only here, on a throwaway GitHub runner, inside scratch Hermes homes.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        hermes-ref: [v0.23.0, v0.23.1, main]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2  # v10.3.3
+        with:
+          python-version: "3.14"
+      - name: Install Hermes
+        env:
+          HERMES_REF: ${{ matrix.hermes-ref }}
+        run: |
+          git clone --quiet --depth 1 --branch "$HERMES_REF" https://github.com/NousResearch/hermes-agent.git "$RUNNER_TEMP/hermes-agent"
+          git clone --quiet --depth 1 https://github.com/NousResearch/hermes-agent.git "$RUNNER_TEMP/catalog"
+          (cd "$RUNNER_TEMP/hermes-agent" && uv export --quiet --frozen --no-hashes --no-emit-project --extra anthropic -o "$RUNNER_TEMP/req.txt")
+          uv venv --quiet "$RUNNER_TEMP/hermes-venv" --python 3.14
+          VIRTUAL_ENV="$RUNNER_TEMP/hermes-venv" uv pip install --quiet --no-deps -r "$RUNNER_TEMP/req.txt"
+          VIRTUAL_ENV="$RUNNER_TEMP/hermes-venv" uv pip install --quiet --no-deps -e "$RUNNER_TEMP/hermes-agent"
+      - name: Check plugins
+        env:
+          HERMES_REF: ${{ matrix.hermes-ref }}
+          HERMES_HOME: ${{ runner.temp }}/compat-home
+        run: |
+          python3 -m pip install --quiet pyyaml
+          python3 ci/compat.py --hermes-python "$RUNNER_TEMP/hermes-venv/bin/python" \
+            --hermes-src "$RUNNER_TEMP/hermes-agent" --catalog "$RUNNER_TEMP/catalog" \
+            --label "$HERMES_REF" --out "compat-out/$HERMES_REF.json"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
+        with:
+          name: compat-${{ matrix.hermes-ref }}
+          path: compat-out/*.json
+
+  publish:
+    needs: check
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4.3.0
+        with:
+          path: parts
+          merge-multiple: true
+      - name: Merge and push to compat-data
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          python3 - <<'EOF'
+          import glob, json, time
+          runs = [json.load(open(f)) for f in sorted(glob.glob("parts/*.json"))]
+          json.dump({"generated": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "runs": runs},
+                    open("compat.json", "w"), indent=2)
+          EOF
+          git init -q out && mv compat.json out/ && cd out
+          git checkout -q -b compat-data
+          git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+            add compat.json
+          git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+            commit -qm "compat data"
+          git push -q --force "https://x-access-token:$GH_TOKEN@github.com/$REPO.git" compat-data

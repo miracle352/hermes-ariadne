@@ -85,10 +85,20 @@ def compare(cassette: str | Path, python_a: str, python_b: str, *, label_a: str 
         if side.result.errors:
             changes.append({"kind": "replay_error", "side": side.label, "errors": side.result.errors[:3]})
     if a.result and b.result:
-        ra, rb = a.result.replies, b.result.replies
+        ra, rb = [_reply_shape(r) for r in a.result.replies], [_reply_shape(r) for r in b.result.replies]
         if ra != rb:
             changes.append({"kind": "final_replies", "a": ra, "b": rb})
     return Comparison(str(cassette), a, b, changes)
+
+
+def _reply_shape(reply: str) -> str:
+    """Structured command output (a manual compression's JSON report) carries token counts that
+    follow from how long the request was; the request diff already shows that change."""
+    import re
+    text = reply if isinstance(reply, str) else json.dumps(reply)
+    if text.lstrip().startswith("{"):
+        return re.sub(r"\d+", "#", text)
+    return text
 
 
 def diff_live(a: list[dict[str, Any]], b: list[dict[str, Any]]) -> list[dict[str, Any]]:

@@ -1,0 +1,30 @@
+# Catalog plugins checked against Hermes releases and main.
+# Chosen because they hook deep into Hermes (several hooks each) and need no API keys.
+hermes_otel
+muster
+heartbeat2
+hermes-telemetry
+rex
+plan-mode
+lithermes
+hermes-sidepulse
+hermes-sanctuary
+flightlog
+superlocalmemory
+omh
+lineage
+hermes-town
+agent-hint
+perf-hud
+nerve
+hypnos
+hermes-continuity-capture
+traceverse_hermes_otel
+escalation-governor
+model-router
+hermes-canvas
+bot-activity
+tokenwatch
+secret-guard
+moment
+time-machine

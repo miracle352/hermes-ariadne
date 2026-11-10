@@ -148,6 +148,41 @@ nav .wrap{display:flex;align-items:center;justify-content:space-between}
 .forksvg .alt{stroke:var(--flame);stroke-width:3;stroke-dasharray:1;stroke-dashoffset:1}
 .forksvg text{font-family:Mono;font-size:12px;fill:var(--mute)}
 
+
+/* upgrade + compat */
+.update{padding:150px 0 60px}
+.up-grid{display:grid;grid-template-columns:1fr 1fr;gap:60px;align-items:center}
+.up-lead{color:#BDB8B0;font-size:18px;line-height:1.55;margin-top:22px;max-width:520px}
+.up-cmd{display:inline-block;margin-top:26px;font-family:Mono;font-size:15px;padding:14px 18px;border:1px solid var(--line);border-radius:12px;background:var(--ink2)}
+.up-cmd b{color:var(--flame);font-weight:400}
+.up-card{border:1px solid rgba(255,90,31,.45);border-radius:22px;padding:26px;background:radial-gradient(500px 260px at 20% 0%,rgba(255,90,31,.14),transparent 70%),var(--ink2);box-shadow:0 40px 120px -40px rgba(255,90,31,.3)}
+.up-top{display:flex;gap:12px;align-items:center;color:var(--mute);font-size:14px}
+.up-top .f{color:var(--flame)}
+.up-arr{color:var(--dim)}
+.up-verdict{font-size:clamp(40px,4.4vw,64px);color:var(--flame);margin:14px 0 18px;line-height:1}
+.up-rows{display:flex;flex-direction:column;gap:8px;min-height:200px}
+.up-row{display:grid;grid-template-columns:24px 1fr auto;gap:12px;align-items:center;padding:11px 14px;border:1px solid var(--line);border-radius:12px;font-size:14px;color:#CFCAC2;opacity:0;transform:translateY(8px);transition:opacity .5s var(--ease),transform .5s var(--ease)}
+.up-row.on{opacity:1;transform:none}
+.up-row i{width:22px;height:22px;border-radius:50%;border:1px solid var(--flame);color:var(--flame);display:grid;place-items:center;font-style:normal;font-family:Mono;font-size:12px}
+.up-row span:last-child{font-family:Mono;font-size:11px;color:var(--mute)}
+.up-foot{margin-top:16px;color:var(--mute);font-size:12px}
+.compat{padding:110px 0 60px}
+.ctable{margin-top:40px;border:1px solid var(--line);border-radius:18px;overflow:auto;background:var(--ink2)}
+.ctable table{width:100%;border-collapse:collapse;font-size:14px;min-width:560px}
+.ctable th,.ctable td{padding:12px 16px;border-bottom:1px solid var(--line);text-align:left}
+.ctable th{font-family:Mono;font-weight:400;font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:var(--mute)}
+.ctable td.c{font-family:Mono;text-align:center;width:120px}
+.ctable td.ok{color:var(--flame)}
+.ctable td.fail{color:#FF6B6B}
+.ctable td.skipped{color:var(--dim)}
+.ctable td .why{display:block;font-family:Mono;font-size:11.5px;color:#FF8A8A;margin-top:5px;line-height:1.5}
+.ctable td .why b{font-weight:400;color:var(--mute)}
+.cnote{padding:22px;color:var(--mute);font-size:13px}
+.csum{display:flex;gap:28px;flex-wrap:wrap;padding:18px 16px;border-bottom:1px solid var(--line)}
+.csum b{font-family:Display;font-size:34px;letter-spacing:-.04em;display:block;color:var(--soft)}
+.csum span{font-family:Mono;font-size:11px;letter-spacing:.14em;color:var(--mute);text-transform:uppercase}
+@media (max-width:900px){.up-grid{grid-template-columns:minmax(0,1fr)}.update{padding:90px 0 40px}}
+
 /* proof */
 .proof{padding:160px 0 120px}
 .proof .grid{display:grid;grid-template-columns:repeat(4,1fr);border-top:1px solid var(--line);border-left:1px solid var(--line);margin-top:56px}
@@ -250,9 +285,9 @@ code,.card div{overflow-wrap:anywhere}
   <a class="brand" href="#top"><svg width="30" height="30" viewBox="0 0 96 96" class="mk" aria-hidden="true"></svg>Ariadne</a>
   <div class="links">
     <a class="hide" href="#how">How it works</a>
+    <a class="hide" href="#update">Safe to update?</a>
+    <a class="hide" href="#compat">Plugins</a>
     <a class="hide" href="#proof">Proof</a>
-    <a class="hide" href="#desktop">Desktop</a>
-    <a class="hide" href="#ci">CI</a>
     <a class="btn ghost sm" href="https://github.com/miracle352/hermes-ariadne">GitHub</a>
   </div>
 </div></nav>
@@ -330,6 +365,30 @@ code,.card div{overflow-wrap:anywhere}
       </div>
     </div>
   </div>
+</section>
+
+<section class="update wrap" id="update">
+  <div class="up-grid">
+    <div class="fade">
+      <div class="eyebrow">Before you update Hermes</div>
+      <h2 class="title">Is it <span class="f">safe</span><br>to update?</h2>
+      <p class="up-lead">One button. Ariadne installs the new Hermes in a private folder, replays your own sessions on both versions with your plugins loaded, offline, and answers in plain words: what changed, which tools, and whether a plugin broke. Your Hermes is never touched.</p>
+      <code class="up-cmd"><b>$</b> hermes ariadne upgrade-check</code>
+    </div>
+    <div class="up-card fade" id="upcard">
+      <div class="up-top"><span class="mono">v0.23.0</span><span class="up-arr">→</span><span class="mono f">v0.23.1</span></div>
+      <div class="up-verdict display">Safe to update</div>
+      <div class="up-rows" id="uprows"></div>
+      <div class="up-foot mono">4 sessions · 114 s · 0 tokens</div>
+    </div>
+  </div>
+</section>
+
+<section class="compat wrap" id="compat">
+  <div class="eyebrow fade">Plugin compatibility</div>
+  <h2 class="title fade">Real catalog plugins,<br>on <span class="f">every Hermes</span>.</h2>
+  <p class="up-lead fade" style="max-width:720px">Plugins from the Hermes catalog, at the exact commit the catalog pins, loaded into offline replays on each Hermes release and main. A cross means the plugin failed to validate, did not load, or one of its hooks crashed.</p>
+  <div class="ctable fade" id="ctable"><div class="mono cnote">Loading the latest results…</div></div>
 </section>
 
 <section class="proof wrap" id="proof">
@@ -605,6 +664,36 @@ code,.card div{overflow-wrap:anywhere}
   addEventListener('resize', fitHuge); document.fonts.ready.then(fitHuge); fitHuge()
 
   $$('.cell').forEach(c => c.addEventListener('pointermove', e => { const r = c.getBoundingClientRect(); c.style.setProperty('--mx', `${e.clientX - r.left}px`); c.style.setProperty('--my', `${e.clientY - r.top}px`) }))
+
+
+  // ---------------------------------------------------------------- upgrade card: rows land one by one
+  const UPROWS = ['List the files in ariadne-demo.', 'Search the web for the v0.23.0 release notes…', "create b.txt with 'beta' and read it back", 'Create a folder called ariadne-demo…']
+  $('#uprows').innerHTML = UPROWS.map(t => `<div class="up-row"><i>=</i><span>${t}</span><span>same</span></div>`).join('')
+  const upio = new IntersectionObserver(es => es.forEach(e => {
+    if (!e.isIntersecting) return
+    upio.disconnect()
+    $$('#uprows .up-row').forEach((r, i) => setTimeout(() => r.classList.add('on'), 300 + i * 380))
+  }), { threshold: .4 })
+  upio.observe($('#upcard'))
+
+  // ---------------------------------------------------------------- live plugin compatibility table
+  const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;')
+  fetch('https://raw.githubusercontent.com/miracle352/hermes-ariadne/compat-data/compat.json', { cache: 'no-store' })
+    .then(r => r.ok ? r.json() : Promise.reject(r.status))
+    .then(data => {
+      const runs = data.runs || []
+      const names = [...new Set(runs.flatMap(r => r.plugins.map(p => p.plugin)))].sort()
+      const cell = (run, n) => run.plugins.find(p => p.plugin === n)
+      const ok = runs.map(r => r.plugins.filter(p => p.status === 'ok').length)
+      const fails = runs.map(r => r.plugins.filter(p => p.status === 'fail').length)
+      const head = `<div class="csum">${runs.map((r, i) => `<div><b>${ok[i]}/${r.plugins.length}</b><span>work on ${esc(r.hermes)}</span></div>`).join('')}<div><b>${fails.reduce((a, b) => a + b, 0)}</b><span>breakages found</span></div></div>`
+      const rows = names.map(n => {
+        const why = runs.map(r => { const c = cell(r, n); return c && c.status === 'fail' && c.notes[0] ? `<span class="why"><b>${esc(r.hermes)}</b> · ${esc(c.notes[0]).slice(0, 160)}</span>` : '' }).join('')
+        return `<tr><td>${esc(n)}${why}</td>${runs.map(r => { const c = cell(r, n); const st = c ? c.status : 'skipped'; return `<td class="c ${st}">${st === 'ok' ? '✓' : st === 'fail' ? '✗' : '–'}</td>` }).join('')}</tr>`
+      }).join('')
+      $('#ctable').innerHTML = head + `<table><thead><tr><th>Plugin</th>${runs.map(r => `<th style="text-align:center">${esc(r.hermes)}</th>`).join('')}</tr></thead><tbody>${rows}</tbody></table><div class="mono cnote">Checked ${esc((data.generated || '').replace('T', ' ').slice(0, 16))} UTC · offline replays on GitHub Actions</div>`
+    })
+    .catch(() => { $('#ctable').innerHTML = '<div class="mono cnote">The first results are being collected. They refresh from GitHub Actions.</div>' })
 
   // ---------------------------------------------------------------- typed workflow
   const CODE = [
