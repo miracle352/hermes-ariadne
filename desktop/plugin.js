@@ -271,9 +271,15 @@ function ThreadField() {
     const ro = new ResizeObserver(resize)
     ro.observe(canvas)
     resize()
-    const style = getComputedStyle(canvas)
-    const accent = style.getPropertyValue('--ui-accent').trim() || '#ff5a1f'
-    const ink = style.getPropertyValue('--ui-text-quaternary').trim() || '#888'
+    let accent = '#ff5a1f'
+    let ink = '#888'
+    const readColors = () => {
+      const style = getComputedStyle(canvas)
+      accent = style.getPropertyValue('--ui-accent').trim() || accent
+      ink = style.getPropertyValue('--ui-text-quaternary').trim() || ink
+    }
+    readColors()
+    const colorTimer = setInterval(readColors, 1500) // the theme can change while the page is open
     const lines = Array.from({ length: 9 }, (_, i) => ({
       amp: 18 + i * 7,
       freq: 0.0022 + i * 0.00031,
@@ -314,6 +320,7 @@ function ThreadField() {
     raf = requestAnimationFrame(draw)
     return () => {
       cancelAnimationFrame(raf)
+      clearInterval(colorTimer)
       ro.disconnect()
     }
   }, [])
@@ -799,7 +806,9 @@ function UpgradeCheck() {
     queryFn: () => rest('/upgrade'),
     refetchInterval: q => (q.state.data && q.state.data.job && q.state.data.job.state === 'running' ? 1500 : false)
   })
-  const [to, setTo] = useState('release')
+  const [picked, setTo] = useState(null)
+  const onLatest = !!(targets.data && targets.data.on_latest_release)
+  const to = picked || (onLatest ? 'main' : 'release')
   if (st.isError) {
     return h(BackendDown, { error: st.error })
   }
@@ -855,7 +864,7 @@ function UpgradeCheck() {
           sizing: 'content',
           value: to
         }),
-        h(Button, { disabled: running, onClick: start }, running ? 'Checking…' : 'Check my sessions')
+        h(Button, { disabled: running || (onLatest && to === 'release'), onClick: start }, running ? 'Checking…' : 'Check my sessions')
       )
     ),
     running &&
@@ -883,7 +892,7 @@ function UpgradeCheck() {
           h(
             'div',
             { className: 'ar-chips', style: { margin: 0 } },
-            h('span', { className: 'ar-chip' }, `${shortVersion(result.current)} → ${shortVersion(result.new)}`),
+            h('span', { className: 'ar-chip' }, `${shortVersion(result.current)} → ${/unknown/i.test(result.new || '') ? result.target : shortVersion(result.new)}`),
             h('span', { className: 'ar-chip' }, h('b', null, result.counts.same), ' same'),
             h('span', { className: 'ar-chip' }, h('b', null, result.counts.changed), ' changed'),
             h('span', { className: 'ar-chip' }, h('b', null, result.counts.broken), ' broken'),
@@ -892,6 +901,7 @@ function UpgradeCheck() {
         )
       ),
     rows.length > 0 && h('div', { className: 'ar-uprows' }, rows.map((r, i) => h(UpgradeRow, { i, key: r.cassette + i, row: r }))),
+    onLatest && to === 'release' && h('div', { className: 'ar-note', style: { marginTop: 14 } }, `You are already on the newest release (${t.release}). Pick main to see what the next update would change.`),
     !running && !result && h('div', { className: 'ar-note', style: { marginTop: 18 } }, 'Checks your 5 newest recordings. The first check also downloads that Hermes once (a few minutes); later checks reuse it.')
   )
 }

@@ -208,3 +208,15 @@ def test_compare_ignores_token_counts_in_command_output():
     b = '<session.compress: {"before_tokens": 15274, "after_tokens": 13810}>'
     assert compare._reply_shape(a) == compare._reply_shape(b)
     assert compare._reply_shape("Noted 7.") != compare._reply_shape("Noted 8.")
+
+
+def test_upgrade_titles_skip_system_notes_and_empty_recordings(tmp_path):
+    up = importlib.import_module(f"{pkg}.upgrade")
+
+    class Tape:
+        id = "20261107-x"
+        def __init__(self, msgs): self._m = msgs
+        def turns(self): return [{"user_message": m} for m in self._m]
+    assert up.session_title(Tape(["[System note: first time opening the app. Run [onboarding].]\n\nhi there"])) == "hi there"
+    assert up.session_title(Tape(["[System note: first time.]"])) == "First-run onboarding"
+    assert up.session_title(Tape([])) == "20261107-x"

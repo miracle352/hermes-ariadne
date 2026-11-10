@@ -93,7 +93,8 @@ def install(ref: str, progress: Progress = _quiet, max_age_hours: float = 6.0) -
     if stamp.is_file() and py.is_file():
         info = json.loads(stamp.read_text(encoding="utf-8"))
         moving = not _RELEASE.search("refs/tags/" + ref)
-        if not moving or time.time() - info.get("at", 0) < max_age_hours * 3600:
+        stale = moving and ((src / ".git" / "shallow").exists() or time.time() - info.get("at", 0) > max_age_hours * 3600)
+        if not stale:
             progress({"stage": "install", "note": f"using the {ref} already installed for checks"})
             return py, info.get("commit", "")
     uv = find_uv()
@@ -263,6 +264,29 @@ def explain(changes: list[dict[str, Any]], live_a: list[dict[str, Any]], live_b:
 MINOR = ("Rewords how it describes", "Gives the model different instructions", "Sends the tool list in a different order")
 
 
+_NOTE = re.compile(r"^\s*\[System note:.*?\](?:\s*\n|\s*$)", re.S)  # the note ends at a "]" that closes a line
+
+
+def session_title(tape: cas.Cassette) -> str:
+    """The first thing the user actually typed (Hermes's own bracketed notes removed)."""
+    for turn in tape.turns():
+        msg = turn.get("user_message")
+        text = msg if isinstance(msg, str) else json.dumps(msg, ensure_ascii=False)
+        text = _NOTE.sub("", text).strip()
+        if text:
+            return " ".join(text.split())[:140]
+    return "First-run onboarding" if tape.turns() else tape.id
+
+
+def has_content(path: Path) -> bool:
+    """A recording worth checking: at least one user turn and one model call."""
+    try:
+        tape = cas.load(path)
+    except cas.CassetteError:
+        return False
+    return bool(tape.turns()) and bool(tape.of("llm"))
+
+
 @dataclass
 class CassetteCheck:
     cassette: str
@@ -285,7 +309,7 @@ def _problems(result: driver.PlayResult | None) -> list[dict[str, Any]]:
 def check_one(path: Path, current_py: str, new_py: str, plugins: list[Path] | None = None) -> CassetteCheck:
     tape = cas.load(path)
     turns = tape.turns()
-    title = str(turns[0].get("user_message") or tape.id)[:140] if turns else tape.id
+    title = session_title(tape)
     cmp = compare.compare(path, current_py, new_py, label_a="current", label_b="new",
                           opts=driver.PlayOptions(quiet=True, extra_plugins=[str(p) for p in plugins or []]))
     va, vb = _violations(cmp.a.result), _violations(cmp.b.result)
@@ -319,12 +343,14 @@ def run(to: str = "release", cassettes: list[Path] | None = None, limit: int = 5
     started = time.time()
     current_py = sys.executable
     current = compare.hermes_version(current_py)
-    tapes = cassettes if cassettes is not None else list(cas.iter_dir(runtime.cassette_dir()))[:limit]
+    tapes = cassettes if cassettes is not None else [p for p in cas.iter_dir(runtime.cassette_dir()) if has_content(p)][:limit]
     if not tapes:
         raise RuntimeError("no recordings yet: turn recording on and use Hermes, then check again")
     progress({"stage": "resolve", "note": f"finding Hermes {to}"})
     new_py, label, commit = resolve(to, progress)
     new = compare.hermes_version(new_py)
+    if not new or "unknown" in new.lower():
+        new = f"{label} ({commit[:8]})" if commit else label
     plugins = user_plugins() if with_plugins else []
     dep_errors = install_plugin_deps(new_py, plugins, progress) if plugins else []
     def one(path: Path) -> CassetteCheck:
