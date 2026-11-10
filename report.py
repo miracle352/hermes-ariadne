@@ -35,6 +35,22 @@ def render(result: Any, max_diffs: int = 12) -> str:
         for e in cv[:8]:
             ids = {k: v for k, v in e.items() if k not in ("type", "t", "rule", "promise")}
             lines.append(f"  ! {e.get('rule')}: {e.get('promise')}  {ids}")
+    pp = [e for e in ev if e.get("type") == "plugin_problem"]
+    if pp:
+        lines.append(f"plugins   {len(pp)} plugin problem(s) during the replay")
+        for e in pp[:6]:
+            g = e.get("groups") or []
+            if e.get("kind") == "plugin_hook_raised" and len(g) >= 3:
+                lines.append(f"  ! hook {g[0]}: {g[1]} raised {g[2][:160]}")
+            elif e.get("kind") == "plugin_load_failed" and len(g) >= 2:
+                lines.append(f"  ! plugin {g[0]} failed to load: {g[1][:160]}")
+            elif e.get("kind") == "plugin_hook_timeout" and len(g) >= 2:
+                lines.append(f"  ! hook {g[0]}: {g[1]} timed out")
+            else:
+                lines.append(f"  ! {e.get('kind')}: {e.get('line', '')[-160:]}")
+    dropped = next((e for e in ev if e.get("type") == "config_dropped"), None)
+    if dropped:
+        lines.append(f"config    not replayed (can run commands or reach endpoints): {', '.join(dropped.get('keys') or [])}")
     envs = [e for e in ev if e.get("type") == "environment_diff"]
     if envs:
         first = envs[0]

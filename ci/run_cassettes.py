@@ -57,6 +57,8 @@ def main() -> int:
         bad = res.verdict != "identical" if args.fail_on == "drift" else bool(violations) if args.fail_on == "contract" else False
         if args.fail_on == "drift" and violations:
             bad = True
+        if args.fail_on != "never" and any(e.get("type") == "plugin_problem" for e in res.events):
+            bad = True  # the plugin under test failed to load, or one of its hooks raised or hung
         failed = failed or bad or res.verdict in ("error", "leak")
         rows.append((Path(tape).name, res.verdict, f"{c('llm_match')}/{c('llm_match') + c('llm_drift')}",
                      f"{c('tool_match')}/{c('tool_match') + c('tool_drift') + c('off_script_tool')}", len(violations)))

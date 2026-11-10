@@ -117,7 +117,7 @@ def install(ref: str, progress: Progress = _quiet, max_age_hours: float = 6.0) -
     env = dict(os.environ, VIRTUAL_ENV=str(venv))
     for args in (["-r", str(req)], ["-e", str(src)]):
         out = subprocess.run([uv, "pip", "install", "--quiet", "--no-deps", "--python", str(py), *args],
-                             capture_output=True, text=True, env=env, timeout=1800)
+                             capture_output=True, text=True, env={k: v for k, v in env.items() if k != "PYTHONPATH"}, timeout=1800)
         if out.returncode != 0:
             raise RuntimeError(f"installing Hermes {ref} failed: {(out.stderr or out.stdout).strip()[-600:]}")
     stamp.write_text(json.dumps({"ref": ref, "commit": commit, "at": time.time()}), encoding="utf-8")
@@ -133,7 +133,47 @@ def resolve(to: str, progress: Progress = _quiet) -> tuple[str, str, str]:
         return str(_venv_python(p)), p.name, ""
     ref = latest_release() if to in ("release", "latest") else to
     py, commit = install(ref, progress)
+    # Prove the throwaway interpreter really runs the Hermes we installed, not the one we run in.
+    from .util import hermes_source
+    src = runtime.data_dir() / "hermes" / _safe(ref) / "src"
+    got = hermes_source(str(py))
+    if not got or Path(got).resolve() != src.resolve():
+        raise RuntimeError(f"the Hermes {ref} install imports Hermes from {got or 'nowhere'}, not {src}; refusing to compare")
     return str(py), ref, commit
+
+
+# ----------------------------------------------------------------------------- your plugins
+
+def user_plugins() -> list[Path]:
+    """The plugins enabled on this profile (other than Ariadne), as directories."""
+    from .util import read_yaml
+    home = Path(runtime.hermes_home())
+    cfg = read_yaml(home / "config.yaml")
+    enabled = (cfg.get("plugins") or {}).get("enabled") if isinstance(cfg.get("plugins"), dict) else None
+    out = []
+    for name in enabled or []:
+        d = home / "plugins" / str(name)
+        if name != "ariadne" and (d / "plugin.yaml").is_file():
+            out.append(d.resolve())
+    return out
+
+
+def install_plugin_deps(new_py: str, plugins: list[Path], progress: Progress = _quiet) -> list[str]:
+    """Install the Python packages your plugins declare into the throwaway Hermes."""
+    from .util import read_yaml
+    reqs: list[str] = []
+    for d in plugins:
+        meta = read_yaml(d / "plugin.yaml")
+        for key in ("python_dependencies", "pip_dependencies"):
+            reqs += [r for r in (meta.get(key) or []) if isinstance(r, str) and r.strip()]
+    uv = find_uv()
+    if not reqs or not uv:
+        return []
+    progress({"stage": "install", "note": f"installing {len(reqs)} package(s) your plugins need"})
+    from .util import env_for
+    out = subprocess.run([uv, "pip", "install", "--quiet", "--python", new_py, *sorted(set(reqs))],
+                         capture_output=True, text=True, timeout=900, env=env_for(new_py))
+    return [] if out.returncode == 0 else [(out.stderr or out.stdout).strip()[-300:]]
 
 
 # ----------------------------------------------------------------------------- verdicts
@@ -235,12 +275,16 @@ def _violations(result: driver.PlayResult | None) -> list[dict[str, Any]]:
     return [e for e in (result.events if result else []) if e.get("type") == "contract_violation"]
 
 
-def check_one(path: Path, current_py: str, new_py: str) -> CassetteCheck:
+def _problems(result: driver.PlayResult | None) -> list[dict[str, Any]]:
+    return [e for e in (result.events if result else []) if e.get("type") == "plugin_problem"]
+
+
+def check_one(path: Path, current_py: str, new_py: str, plugins: list[Path] | None = None) -> CassetteCheck:
     tape = cas.load(path)
     turns = tape.turns()
     title = str(turns[0].get("user_message") or tape.id)[:140] if turns else tape.id
     cmp = compare.compare(path, current_py, new_py, label_a="current", label_b="new",
-                          opts=driver.PlayOptions(quiet=True))
+                          opts=driver.PlayOptions(quiet=True, extra_plugins=[str(p) for p in plugins or []]))
     va, vb = _violations(cmp.a.result), _violations(cmp.b.result)
     seen = {v.get("rule") for v in va}
     new_v = [v for v in vb if v.get("rule") not in seen]
@@ -250,6 +294,16 @@ def check_one(path: Path, current_py: str, new_py: str) -> CassetteCheck:
     reasons = explain(cmp.changes, cmp.a.live, cmp.b.live)
     for v in new_v:
         reasons.append(f"Breaks a promise plugins rely on: {v.get('promise') or v.get('rule')}.")
+    before = {p.get("line", "")[:160] for p in _problems(cmp.a.result)}
+    new_p = [p for p in _problems(cmp.b.result) if p.get("line", "")[:160] not in before]
+    for p in new_p:
+        g = p.get("groups") or []
+        if p["kind"] == "plugin_load_failed":
+            reasons.append(f"Your plugin {g[0] if g else ''} no longer loads: {(g[1] if len(g) > 1 else '')[:160]}")
+        else:
+            reasons.append(f"A plugin hook crashes: {g[1] if len(g) > 1 else ''} on {g[0] if g else ''}"
+                           + (f" ({g[2][:120]})" if len(g) > 2 else "") + ".")
+    new_v = new_v + [{"rule": "plugin", **p} for p in new_p]
     broken = bool(new_v) or any(c["kind"] == "replay_error" and c.get("side") == "new" for c in cmp.changes)
     verdict = "broken" if broken else ("changed" if cmp.changes else "same")
     row = CassetteCheck(path.name.removesuffix(cas.SUFFIX), title, verdict, reasons, new_v, cmp.changes)
@@ -258,7 +312,7 @@ def check_one(path: Path, current_py: str, new_py: str) -> CassetteCheck:
 
 
 def run(to: str = "release", cassettes: list[Path] | None = None, limit: int = 10,
-        progress: Progress = _quiet) -> dict[str, Any]:
+        progress: Progress = _quiet, with_plugins: bool = True) -> dict[str, Any]:
     started = time.time()
     current_py = sys.executable
     current = compare.hermes_version(current_py)
@@ -268,11 +322,13 @@ def run(to: str = "release", cassettes: list[Path] | None = None, limit: int = 1
     progress({"stage": "resolve", "note": f"finding Hermes {to}"})
     new_py, label, commit = resolve(to, progress)
     new = compare.hermes_version(new_py)
+    plugins = user_plugins() if with_plugins else []
+    dep_errors = install_plugin_deps(new_py, plugins, progress) if plugins else []
     rows: list[CassetteCheck] = []
     for i, path in enumerate(tapes, 1):
         progress({"stage": "replay", "done": i - 1, "total": len(tapes), "cassette": Path(path).name})
         try:
-            row = check_one(Path(path), current_py, new_py)
+            row = check_one(Path(path), current_py, new_py, plugins)
         except Exception as exc:  # one bad cassette must not hide the others
             row = CassetteCheck(Path(path).name.removesuffix(cas.SUFFIX), Path(path).name, "broken",
                                 [f"Could not replay: {type(exc).__name__}: {exc}"])
@@ -284,6 +340,7 @@ def run(to: str = "release", cassettes: list[Path] | None = None, limit: int = 1
     result = {
         "verdict": verdict, "minor": minor, "target": label, "target_commit": commit, "current": current, "new": new,
         "counts": counts, "sessions": [r.__dict__ for r in rows],
+        "plugins": [driver._plugin_name(p) for p in plugins], "plugin_dep_errors": dep_errors,
         "started": started, "seconds": round(time.time() - started, 1),
     }
     out = runtime.data_dir() / "upgrade"
@@ -307,6 +364,8 @@ def render(result: dict[str, Any]) -> str:
     c = result["counts"]
     lines = [f"Ariadne upgrade check  ·  {result['current']}  ->  {result['new']}",
              f"{head}: {c['same']} same, {c['changed']} changed, {c['broken']} broken  ({result['seconds']} s, offline replays)"]
+    if result.get("plugins"):
+        lines.append(f"with your plugins loaded: {', '.join(result['plugins'])}")
     mark = {"same": "=", "changed": "~", "broken": "!"}
     for s in result["sessions"]:
         lines.append(f"\n  {mark[s['verdict']]} {s['title'][:90]}")

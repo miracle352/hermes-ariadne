@@ -180,3 +180,23 @@ def test_upgrade_picks_the_release_tag_and_explains_tool_changes():
     assert "Gives the model new tools: web_fetch." in out
     assert "Changes the arguments of: patch." in out
     assert "Rewords how it describes: delegate_task." in out
+
+
+def test_replay_reports_plugin_crashes_from_hermes_logs(tmp_path):
+    driver = importlib.import_module(f"{pkg}.driver")
+    (tmp_path / "logs").mkdir()
+    (tmp_path / "logs" / "agent.log").write_text(
+        "2026 WARNING hermes_cli.plugins: Hook 'pre_llm_call' callback boom raised: crashy says no "
+        "(hook provides: model, session_id; identical failures are logged at DEBUG from now on)\n"
+        "2026 WARNING hermes_cli.plugins_loader: Failed to load plugin 'crashy': No module named 'x'\n", encoding="utf-8")
+    found = driver.plugin_problems(tmp_path)
+    assert [p["kind"] for p in found] == ["plugin_hook_raised", "plugin_load_failed"]
+    assert found[0]["groups"] == ["pre_llm_call", "boom", "crashy says no"]
+
+
+def test_another_hermes_never_inherits_our_import_path(monkeypatch):
+    util = importlib.import_module(f"{pkg}.util")
+    monkeypatch.setenv("PYTHONPATH", "/opt/current-hermes")
+    other = util.env_for("/somewhere/else/venv/bin/python")
+    assert "PYTHONPATH" not in other and other["PYTHONSAFEPATH"] == "1"
+    assert util.env_for(sys.executable)["PYTHONPATH"] == "/opt/current-hermes"

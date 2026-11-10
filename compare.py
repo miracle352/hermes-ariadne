@@ -48,8 +48,11 @@ class Comparison:
 
 def hermes_version(python: str) -> str:
     import subprocess
+    import tempfile
+    from .util import env_for
     try:
-        out = subprocess.run([python, "-m", "hermes_cli.main", "--version"], capture_output=True, text=True, timeout=60)
+        out = subprocess.run([python, "-m", "hermes_cli.main", "--version"], capture_output=True, text=True, timeout=60,
+                             env=env_for(python), cwd=tempfile.gettempdir())
         for line in (out.stdout or "").splitlines():
             line = line.strip()
             if line:
@@ -105,7 +108,9 @@ def diff_live(a: list[dict[str, Any]], b: list[dict[str, Any]]) -> list[dict[str
                         "sections": sorted({normalize.section_of(d["path"]) for d in diffs}), "diffs": diffs})
     ta = [(e.get("tool_name"), json.dumps(e.get("args"), sort_keys=True)) for e in a if e.get("kind") == "tool"]
     tb = [(e.get("tool_name"), json.dumps(e.get("args"), sort_keys=True)) for e in b if e.get("kind") == "tool"]
-    if ta != tb:
+    # Tools the model asked for together run in parallel and finish in either order: compare
+    # the calls each model call asked for, not the order they finished in.
+    if sorted(ta) != sorted(tb):
         out.append({"kind": "tool_calls", "a": ta, "b": tb})
     return out
 

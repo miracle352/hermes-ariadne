@@ -114,3 +114,36 @@ def replay_settings(cfg: dict[str, Any], trust: bool = False) -> tuple[dict[str,
         elif key not in ("model", "plugins"):
             dropped.append(key)
     return kept, sorted(dropped)
+
+
+# ---------------------------------------------------------------- running another Hermes
+# Hermes starts its own processes with PYTHONPATH pointing at its code (and the gateway runs
+# from its checkout). A child that runs a *different* Hermes interpreter must not inherit
+# that, or it silently imports the Hermes we are running instead of the one under test.
+_IMPORT_ENV = ("PYTHONPATH", "PYTHONHOME", "PYTHONSTARTUP", "VIRTUAL_ENV")
+
+
+def same_python(python: str) -> bool:
+    import os
+    import sys
+    norm = lambda p: os.path.normcase(os.path.abspath(p))  # noqa: E731 - not resolve(): venvs symlink the same binary
+    return norm(python) == norm(sys.executable)
+
+
+def env_for(python: str, env: dict[str, str] | None = None) -> dict[str, str]:
+    import os
+    out = dict(os.environ if env is None else env)
+    if not same_python(python):
+        for key in _IMPORT_ENV:
+            out.pop(key, None)
+    out["PYTHONSAFEPATH"] = "1"  # `python -m` must not import from the working directory (a Hermes checkout)
+    return out
+
+
+def hermes_source(python: str, cwd: str | None = None) -> str:
+    """Where ``python`` imports Hermes from (the folder holding hermes_cli)."""
+    import subprocess
+    import tempfile
+    out = subprocess.run([python, "-c", "import hermes_cli, os; print(os.path.dirname(os.path.dirname(os.path.abspath(hermes_cli.__file__))))"],
+                         capture_output=True, text=True, timeout=60, env=env_for(python), cwd=cwd or tempfile.gettempdir())
+    return out.stdout.strip()

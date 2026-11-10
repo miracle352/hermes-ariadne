@@ -15,6 +15,7 @@ That gives Ariadne three guarantees:
 from __future__ import annotations
 
 import json
+import re
 import os
 import queue
 import shutil
@@ -206,7 +207,8 @@ def _read_yaml_text(text: str) -> dict[str, Any]:
 
 
 def _child_env(scratch: Path, opts: PlayOptions) -> dict[str, str]:
-    env = {k: v for k, v in os.environ.items()
+    from .util import env_for
+    env = {k: v for k, v in env_for(opts.hermes_python).items()
            if not k.upper().endswith(("_API_KEY", "_TOKEN", "_SECRET")) and k.upper() not in ("HERMES_PROFILE",)}
     env.update({
         "HERMES_HOME": str(scratch),
@@ -342,6 +344,9 @@ def play(cassette_path: str | Path, opts: PlayOptions | None = None) -> PlayResu
                    "note": "Hermes made fewer model calls than the recording"}
         events.append(missing)
         emit("missing_llm_calls", {k: v for k, v in missing.items() if k != "type"})
+    for problem in plugin_problems(scratch):
+        emit("plugin_problem", problem)
+        events.append({"type": "plugin_problem", **problem})
     result = PlayResult(run_dir, report, events, sent, replies, errors)
     (run_dir / "summary.json").write_text(json.dumps({
         "cassette": tape.id, "verdict": result.verdict, "turns_sent": sent, "turns_total": len(turns),
@@ -351,6 +356,30 @@ def play(cassette_path: str | Path, opts: PlayOptions | None = None) -> PlayResu
     if not opts.keep:
         shutil.rmtree(scratch, ignore_errors=True)
     return result
+
+
+_PLUGIN_PROBLEMS = [
+    ("plugin_load_failed", re.compile(r"Failed to load plugin '([^']+)': (.*)")),
+    ("plugin_hook_raised", re.compile(r"Hook '([^']+)' callback (\S+) raised: (.*?)(?: \(hook provides:|$)")),
+    ("plugin_hook_timeout", re.compile(r"Hook '([^']+)' callback (\S+) timed out after")),
+]
+
+
+def plugin_problems(home: Path) -> list[dict[str, Any]]:
+    """Plugin crashes Hermes logged during a replay (load errors, hooks that raised or hung)."""
+    out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for name in ("agent.log", "errors.log", "gateway.log"):
+        log = home / "logs" / name
+        if not log.is_file():
+            continue
+        for line in log.read_text(encoding="utf-8", errors="replace").splitlines():
+            for kind, rx in _PLUGIN_PROBLEMS:
+                m = rx.search(line)
+                if m and m.group(0) not in seen:
+                    seen.add(m.group(0))
+                    out.append({"kind": kind, "groups": list(m.groups()), "line": line.strip()[-400:]})
+    return out
 
 
 def drive_session(hermes_python: str, env: dict[str, str], cwd: str, turns: list[str],
