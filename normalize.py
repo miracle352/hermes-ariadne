@@ -238,6 +238,10 @@ def split_environment(system: list[Any], provider_substituted: bool = False) -> 
         for pattern in _ENV_LINES + ([_PROVIDER_LINE] if provider_substituted else []):
             env["lines"].extend(pattern.findall(text))
             text = pattern.sub("<environment/>", text)
+        # The lines themselves are compared in environment_delta; where they sat, and whether a
+        # side has a line the other lacks (a toolchain line on one machine only), is not Hermes's.
+        text = re.sub(r"[ \t]*<environment/>[ \t]*", "", text)
+        text = re.sub(r"\n{3,}", "\n\n", text)
         core.append(text)
     return core, env
 

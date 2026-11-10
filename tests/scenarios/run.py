@@ -42,6 +42,14 @@ def record(scn: dict, python_a: str, work: Path) -> Path | None:
     (home / "plugins").mkdir(parents=True)
     project.mkdir(parents=True)
     (project / "notes.txt").write_text("hello\n")
+    template = os.environ.get("ARIADNE_TEMPLATE_HOME")  # record inside a copy of a real profile's context
+    if template:
+        for name in ("skills", "SOUL.md", "memories"):
+            src = Path(template) / name
+            if src.is_dir():
+                shutil.copytree(src, home / name, symlinks=True)
+            elif src.is_file():
+                shutil.copy2(src, home / name)
     (home / "plugins" / "ariadne").symlink_to(REPO, target_is_directory=True)
     server = scripted_model.serve(0, _fill(scn["script"], str(project)), work / "model-log")
     cfg = {"model": {"provider": "custom", "model": "scripted", "base_url": f"http://127.0.0.1:{server.server_address[1]}/v1", "api_key": "none"},

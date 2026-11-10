@@ -261,3 +261,11 @@ def test_upgrade_timeout_is_not_a_breakage(monkeypatch, tmp_path):
     monkeypatch.setattr(cmp, "compare", lambda *a, **k: C())
     row = up.check_one(tmp_path / "t.cassette.jsonl", "a", "b")
     assert row.verdict == "unchecked" and row.reasons[0].startswith("Could not finish")
+
+
+def test_an_environment_line_on_one_side_only_is_not_drift():
+    a = "Intro.\n\nConversation started: Monday\nHost: Linux\n\nYou are in the TUI."
+    b = "Intro.\n\nPython toolchain: python3=3.14\n\nConversation started: Tuesday\nHost: Windows\n\nYou are in the TUI."
+    ca, _ = normalize.split_environment([a])
+    cb, _ = normalize.split_environment([b])
+    assert ca == cb, (ca, cb)
