@@ -350,7 +350,21 @@ def check_one(path: Path, current_py: str, new_py: str, plugins: list[Path] | No
             reasons.append(f"A plugin hook crashes: {g[1] if len(g) > 1 else ''} on {g[0] if g else ''}"
                            + (f" ({g[2][:120]})" if len(g) > 2 else "") + ".")
     new_v = new_v + [{"rule": "plugin", **p} for p in new_p]
-    broken = bool(new_v) or any(c["kind"] == "replay_error" and c.get("side") == "new" for c in cmp.changes)
+    def timed_out(c: dict[str, Any]) -> bool:
+        return any("timed out" in str(e) for e in c.get("errors") or [])
+
+    new_errors = [c for c in cmp.changes if c["kind"] == "replay_error" and c.get("side") == "new"]
+    cur_errors = [c for c in cmp.changes if c["kind"] == "replay_error" and c.get("side") != "new"]
+    slow = bool(new_errors) and all(timed_out(c) for c in new_errors)
+    if slow or cur_errors:
+        # A replay that ran out of time (or failed on the Hermes you run now) says nothing about
+        # the new Hermes; report it as unchecked rather than as a breakage.
+        reasons = [r for r in reasons if not r.startswith("The replay failed")]
+        reasons.insert(0, "Could not finish this replay in time, so it was not compared. Check it again on its own."
+                       if slow else "This session does not replay on the Hermes you run now, so it was not compared.")
+        row = CassetteCheck(path.name.removesuffix(cas.SUFFIX), title, "unchecked", reasons[:1], new_v, cmp.changes)
+        return row
+    broken = bool(new_v) or bool(new_errors)
     verdict = "broken" if broken else ("changed" if cmp.changes else "same")
     row = CassetteCheck(path.name.removesuffix(cas.SUFFIX), title, verdict, reasons, new_v, cmp.changes)
     row.minor = verdict == "changed" and all(r.startswith(MINOR) for r in reasons)
@@ -400,8 +414,10 @@ def run(to: str = "release", cassettes: list[Path] | None = None, limit: int = 5
             found[futures[fut]] = row
             progress({"stage": "replay", "done": len(found), "total": len(tapes), "row": row.__dict__})
     rows = [found[i] for i in range(len(tapes))]
-    counts = {v: sum(r.verdict == v for r in rows) for v in ("same", "changed", "broken")}
+    counts = {v: sum(r.verdict == v for r in rows) for v in ("same", "changed", "broken", "unchecked")}
     verdict = "broken" if counts["broken"] else ("changed" if counts["changed"] else "safe")
+    if rows and counts["unchecked"] == len(rows):
+        verdict = "unchecked"
     minor = verdict == "changed" and all(r.minor for r in rows if r.verdict == "changed")
     result = {
         "verdict": verdict, "minor": minor, "target": label, "target_commit": commit, "current": current, "new": new,
@@ -426,15 +442,17 @@ def latest_result() -> dict[str, Any] | None:
 def render(result: dict[str, Any]) -> str:
     if result.get("same_version"):
         return f"You already run {result['target']} ({result['target_commit'][:8]}): there is nothing to update to. Try --to main."
-    head = {"safe": "SAFE TO UPDATE", "changed": "REVIEW BEFORE UPDATING", "broken": "DO NOT UPDATE YET"}[result["verdict"]]
+    head = {"safe": "SAFE TO UPDATE", "changed": "REVIEW BEFORE UPDATING", "broken": "DO NOT UPDATE YET",
+            "unchecked": "COULD NOT CHECK"}[result["verdict"]]
     if result.get("minor"):
         head = "LOOKS SAFE (WORDING CHANGES ONLY)"
     c = result["counts"]
     lines = [f"Ariadne upgrade check  ·  {result['current']}  ->  {result['new']}",
-             f"{head}: {c['same']} same, {c['changed']} changed, {c['broken']} broken  ({result['seconds']} s, offline replays)"]
+             f"{head}: {c['same']} same, {c['changed']} changed, {c['broken']} broken"
+             + (f", {c['unchecked']} not checked" if c.get("unchecked") else "") + f"  ({result['seconds']} s, offline replays)"]
     if result.get("plugins"):
         lines.append(f"with your plugins loaded: {', '.join(result['plugins'])}")
-    mark = {"same": "=", "changed": "~", "broken": "!"}
+    mark = {"same": "=", "changed": "~", "broken": "!", "unchecked": "?"}
     for s in result["sessions"]:
         lines.append(f"\n  {mark[s['verdict']]} {s['title'][:90]}")
         lines.extend(f"      {r}" for r in s["reasons"][:6])

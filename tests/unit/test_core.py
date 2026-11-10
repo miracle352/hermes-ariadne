@@ -239,3 +239,31 @@ def test_version_parts_reads_release_and_commit():
     assert compare.version_parts("Hermes Agent v0.23.1 (2026.9.24) · stable · local 3b4215785882") == ("v0.23.1", "3b4215785882", False)
     assert compare.version_parts("Hermes Agent v0.23.1+413.g5261d77 (2026.9.24) · stable · local 5261d7731413")[2] is True
     assert compare.version_parts("Hermes Agent v0.23.1 (2026.9.24) Â· stable Â· local 3b4215785882")[0] == "v0.23.1"
+
+
+def test_replays_never_run_a_hermes_self_update(tmp_path):
+    driver = importlib.import_module(f"{pkg}.driver")
+    env = driver._child_env(tmp_path, driver.PlayOptions(hermes_python=sys.executable))
+    assert env["HERMES_DISABLE_LAZY_INSTALLS"] == "1"
+
+
+def test_upgrade_timeout_is_not_a_breakage(monkeypatch, tmp_path):
+    up = importlib.import_module(f"{pkg}.upgrade")
+    cmp = importlib.import_module(f"{pkg}.compare")
+
+    class R:
+        events = []
+    class Side:
+        def __init__(self): self.result, self.live = R(), []
+    class C:
+        a, b = Side(), Side()
+        changes = [{"kind": "replay_error", "side": "new", "errors": ["timed out after 300s"]},
+                   {"kind": "model_call_count", "a": 18, "b": 7}]
+
+    class Tape:
+        id = "t"
+        def turns(self): return [{"user_message": "hi"}]
+    monkeypatch.setattr(up.cas, "load", lambda p: Tape())
+    monkeypatch.setattr(cmp, "compare", lambda *a, **k: C())
+    row = up.check_one(tmp_path / "t.cassette.jsonl", "a", "b")
+    assert row.verdict == "unchecked" and row.reasons[0].startswith("Could not finish")

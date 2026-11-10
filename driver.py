@@ -210,6 +210,9 @@ def _child_env(scratch: Path, opts: PlayOptions) -> dict[str, str]:
     from .util import env_for
     env = {k: v for k, v in env_for(opts.hermes_python).items()
            if not k.upper().endswith(("_API_KEY", "_TOKEN", "_SECRET")) and k.upper() not in ("HERMES_PROFILE",)}
+    # A replay must never update Hermes: a git-installed Hermes finishes a pending source update
+    # (uv sync, over the network) on start-up, which in an offline replay retries until it times out.
+    env["HERMES_DISABLE_LAZY_INSTALLS"] = "1"
     env.update({
         "HERMES_HOME": str(scratch),
         "HTTP_PROXY": DEAD_PROXY, "HTTPS_PROXY": DEAD_PROXY, "ALL_PROXY": DEAD_PROXY,

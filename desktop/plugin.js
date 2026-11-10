@@ -159,6 +159,7 @@ const CSS = `
 .ar-uprow-head:disabled{cursor:default}
 .ar-upmark{width:22px;height:22px;border-radius:50%;display:grid;place-items:center;font-size:12px;border:1px solid var(--ui-accent);color:var(--ui-accent)}
 .ar-uprow.changed:not(.minor) .ar-upmark{border-color:var(--ui-yellow,#e5b400);color:var(--ui-yellow,#e5b400)}
+.ar-uprow.unchecked .ar-upmark{border-color:var(--ui-text-quaternary);color:var(--ui-text-tertiary)}
 .ar-uprow.broken .ar-upmark{border-color:var(--ui-red,#f43);color:var(--ui-red,#f43)}
 .ar-uptitle{font-size:13.5px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .ar-reasons{margin:8px 0 0 34px;padding:0;list-style:none;font-size:12.5px;color:var(--ui-text-secondary);line-height:1.6}
@@ -767,13 +768,14 @@ const VERDICT = {
   uptodate: { word: 'Up to date', tone: 'ok', line: 'You already run this Hermes, so there is nothing to compare. Pick main to see what the next update changes.' },
   minor: { word: 'Looks safe', tone: 'ok', line: 'Only wording changed: how Hermes describes some tools or instructs the model.' },
   changed: { word: 'Review first', tone: 'warn', line: 'The new Hermes handles some of your sessions differently. The details are below.' },
+  unchecked: { word: 'Couldn’t check', tone: 'warn', line: 'None of the sessions finished replaying in time. Try again, or check fewer sessions.' },
   broken: { word: 'Don’t update yet', tone: 'bad', line: 'A session failed or a promise plugins rely on broke on the new Hermes.' }
 }
 
 function UpgradeRow({ row, i }) {
   const [open, setOpen] = useState(false)
   const diffs = (row.changes || []).filter(c => c.kind === 'model_request').flatMap(c => c.diffs || [])
-  const mark = row.verdict === 'same' ? '=' : row.verdict === 'broken' ? '!' : '~'
+  const mark = row.verdict === 'same' ? '=' : row.verdict === 'broken' ? '!' : row.verdict === 'unchecked' ? '?' : '~'
   return h(
     'div',
     { className: cn('ar-uprow', row.verdict, row.minor && 'minor'), style: { animationDelay: `${i * 0.05}s` } },
@@ -782,7 +784,7 @@ function UpgradeRow({ row, i }) {
       { className: 'ar-uprow-head', disabled: !diffs.length, onClick: () => setOpen(!open), type: 'button' },
       h('span', { className: 'ar-upmark ar-mono' }, mark),
       h('span', { className: 'ar-uptitle' }, short(row.title, 110)),
-      h('span', { className: 'ar-note ar-mono' }, row.verdict === 'same' ? 'same' : row.minor ? 'wording' : row.verdict)
+      h('span', { className: 'ar-note ar-mono' }, row.verdict === 'same' ? 'same' : row.verdict === 'unchecked' ? 'not checked' : row.minor ? 'wording' : row.verdict)
     ),
     row.reasons && row.reasons.length > 0 && h('ul', { className: 'ar-reasons' }, row.reasons.map((r, k) => h('li', { key: k }, r))),
     open && diffs.length > 0 && h(Diff, { diffs })
@@ -897,6 +899,7 @@ function UpgradeCheck() {
             !result.same_version && h('span', { className: 'ar-chip' }, h('b', null, result.counts.same), ' same'),
             !result.same_version && h('span', { className: 'ar-chip' }, h('b', null, result.counts.changed), ' changed'),
             !result.same_version && h('span', { className: 'ar-chip' }, h('b', null, result.counts.broken), ' broken'),
+            !result.same_version && result.counts.unchecked > 0 && h('span', { className: 'ar-chip' }, h('b', null, result.counts.unchecked), ' not checked'),
             h('span', { className: 'ar-chip' }, `${result.seconds}s · 0 tokens`)
           )
         )

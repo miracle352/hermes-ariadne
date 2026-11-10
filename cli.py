@@ -249,7 +249,7 @@ def _cmd_upgrade(args: argparse.Namespace) -> int:
 
     result = upgrade.run(args.to, tapes, args.limit, say, with_plugins=not args.no_plugins, workers=args.workers)
     print(json.dumps(result, indent=2, default=str) if args.json else "\n" + upgrade.render(result))
-    return {"safe": 0, "changed": 1, "broken": 2}[result["verdict"]]
+    return {"safe": 0, "changed": 1, "broken": 2, "unchecked": 3}[result["verdict"]]
 
 
 def _cmd_export(args: argparse.Namespace) -> int:
