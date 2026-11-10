@@ -87,7 +87,11 @@ def _rmtree(path: Path) -> None:
     import stat
 
     def again(func, target, _exc):
-        os.chmod(target, stat.S_IWRITE)
+        for p in (os.path.dirname(target), target):  # the folder may be locked as well as the file
+            try:
+                os.chmod(p, stat.S_IWRITE | stat.S_IREAD | stat.S_IEXEC)
+            except OSError:
+                pass
         func(target)
 
     if path.exists():
