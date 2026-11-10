@@ -781,6 +781,16 @@ function UpgradeRow({ row, i }) {
   )
 }
 
+function Elapsed({ since }) {
+  const [now, setNow] = useState(Date.now())
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(t)
+  }, [])
+  const s = Math.max(0, Math.round(now / 1000 - (since || now / 1000)))
+  return h('span', null, `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`)
+}
+
 function UpgradeCheck() {
   const qc = useQueryClient()
   const targets = useQuery({ queryKey: [...KEY, 'upgrade-targets'], queryFn: () => rest('/upgrade/targets'), staleTime: 600000, retry: 1 })
@@ -853,7 +863,12 @@ function UpgradeCheck() {
         'div',
         { className: 'ar-up-run' },
         h('div', { className: 'ar-progress run' }, h('i', { style: { width: `${job.total ? Math.max(6, (job.done / job.total) * 100) : 8}%` } })),
-        h('div', { className: 'ar-note ar-mono' }, job.stage === 'replay' && job.total ? `replaying session ${Math.min(job.done + 1, job.total)} of ${job.total} on both versions` : job.note || 'starting')
+        h(
+          'div',
+          { className: 'ar-note ar-mono', style: { display: 'flex', justifyContent: 'space-between', gap: 12 } },
+          h('span', null, job.stage === 'replay' && job.total ? `${job.done} of ${job.total} sessions checked · replaying on both versions at once` : job.note || 'starting'),
+          h(Elapsed, { since: job.started })
+        )
       ),
     job.state === 'failed' && h('div', { className: 'ar-up-err' }, job.error),
     info &&
@@ -877,7 +892,7 @@ function UpgradeCheck() {
         )
       ),
     rows.length > 0 && h('div', { className: 'ar-uprows' }, rows.map((r, i) => h(UpgradeRow, { i, key: r.cassette + i, row: r }))),
-    !running && !result && h('div', { className: 'ar-note', style: { marginTop: 18 } }, 'The first check downloads that Hermes once (a few minutes). Later checks reuse it and take about 20 seconds per session.')
+    !running && !result && h('div', { className: 'ar-note', style: { marginTop: 18 } }, 'Checks your 5 newest recordings. The first check also downloads that Hermes once (a few minutes); later checks reuse it.')
   )
 }
 

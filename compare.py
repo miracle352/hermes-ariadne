@@ -9,6 +9,7 @@ them is a change in Hermes itself.
 
 from __future__ import annotations
 
+import functools
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -46,6 +47,7 @@ class Comparison:
                 "changes": self.changes}
 
 
+@functools.lru_cache(maxsize=16)
 def hermes_version(python: str) -> str:
     import subprocess
     import tempfile
@@ -73,11 +75,17 @@ def compare(cassette: str | Path, python_a: str, python_b: str, *, label_a: str 
             opts: driver.PlayOptions | None = None) -> Comparison:
     base = opts or driver.PlayOptions()
     sides = [Side(label_a, python_a), Side(label_b, python_b)]
-    for side in sides:
+
+    def run(side: Side) -> None:
         o = driver.PlayOptions(**{**base.__dict__, "hermes_python": side.python})
         side.result = driver.play(cassette, o)
         side.version = hermes_version(side.python)
         side.live = _load_live(side.result)
+
+    # The two installs replay at the same time: each is its own process in its own scratch home.
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        list(pool.map(run, sides))
     a, b = sides
     changes = diff_live(a.live, b.live)
     for side in sides:

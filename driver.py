@@ -256,7 +256,7 @@ def _install_into(scratch: Path, opts: PlayOptions, env: dict[str, str]) -> None
 def play(cassette_path: str | Path, opts: PlayOptions | None = None) -> PlayResult:
     opts = opts or PlayOptions()
     tape = cas.load(cassette_path)
-    stamp = time.strftime("%Y%m%d-%H%M%S")
+    stamp = time.strftime("%Y%m%d-%H%M%S") + "-" + os.urandom(2).hex()  # replays can run side by side
     run_dir = runtime.data_dir() / "runs" / f"{tape.id}--{stamp}"
     scratch = run_dir / "home"
     scratch.mkdir(parents=True, exist_ok=True)

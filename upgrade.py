@@ -311,8 +311,8 @@ def check_one(path: Path, current_py: str, new_py: str, plugins: list[Path] | No
     return row
 
 
-def run(to: str = "release", cassettes: list[Path] | None = None, limit: int = 10,
-        progress: Progress = _quiet, with_plugins: bool = True) -> dict[str, Any]:
+def run(to: str = "release", cassettes: list[Path] | None = None, limit: int = 5,
+        progress: Progress = _quiet, with_plugins: bool = True, workers: int = 2) -> dict[str, Any]:
     started = time.time()
     current_py = sys.executable
     current = compare.hermes_version(current_py)
@@ -324,16 +324,25 @@ def run(to: str = "release", cassettes: list[Path] | None = None, limit: int = 1
     new = compare.hermes_version(new_py)
     plugins = user_plugins() if with_plugins else []
     dep_errors = install_plugin_deps(new_py, plugins, progress) if plugins else []
-    rows: list[CassetteCheck] = []
-    for i, path in enumerate(tapes, 1):
-        progress({"stage": "replay", "done": i - 1, "total": len(tapes), "cassette": Path(path).name})
+    def one(path: Path) -> CassetteCheck:
         try:
-            row = check_one(Path(path), current_py, new_py, plugins)
+            return check_one(Path(path), current_py, new_py, plugins)
         except Exception as exc:  # one bad cassette must not hide the others
-            row = CassetteCheck(Path(path).name.removesuffix(cas.SUFFIX), Path(path).name, "broken",
-                                [f"Could not replay: {type(exc).__name__}: {exc}"])
-        rows.append(row)
-        progress({"stage": "replay", "done": i, "total": len(tapes), "row": row.__dict__})
+            return CassetteCheck(Path(path).name.removesuffix(cas.SUFFIX), Path(path).name, "broken",
+                                 [f"Could not replay: {type(exc).__name__}: {exc}"])
+
+    # Each session replays on both installs at once (compare.py); `workers` sessions run side by
+    # side, so 2 workers keep 4 Hermes processes busy. Results keep the order of the recordings.
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    progress({"stage": "replay", "done": 0, "total": len(tapes)})
+    found: dict[int, CassetteCheck] = {}
+    with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
+        futures = {pool.submit(one, Path(p)): i for i, p in enumerate(tapes)}
+        for fut in as_completed(futures):
+            row = fut.result()
+            found[futures[fut]] = row
+            progress({"stage": "replay", "done": len(found), "total": len(tapes), "row": row.__dict__})
+    rows = [found[i] for i in range(len(tapes))]
     counts = {v: sum(r.verdict == v for r in rows) for v in ("same", "changed", "broken")}
     verdict = "broken" if counts["broken"] else ("changed" if counts["changed"] else "safe")
     minor = verdict == "changed" and all(r.minor for r in rows if r.verdict == "changed")

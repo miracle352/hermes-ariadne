@@ -384,7 +384,7 @@ async def upgrade_start(body: dict):
         UPGRADE.clear()
         UPGRADE.update(state="running", started=time.time(), to=str(body.get("to") or "release"),
                        stage="resolve", note="starting", done=0, total=0, rows=[])
-    limit = int(body.get("limit") or 10)
+    limit = int(body.get("limit") or 5)
 
     def progress(ev: dict[str, Any]) -> None:
         if ev.get("note"):

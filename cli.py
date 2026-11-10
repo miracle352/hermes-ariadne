@@ -76,7 +76,8 @@ def setup_argparse(parser: argparse.ArgumentParser) -> None:
     up.add_argument("--to", default="release",
                     help="release (default: the newest Hermes release), main, a git ref, or a Hermes python/venv path")
     up.add_argument("--cassette", action="append", default=None, help="Check only this cassette (repeatable)")
-    up.add_argument("--limit", type=int, default=10, help="How many of your newest recordings to check (default 10)")
+    up.add_argument("--limit", type=int, default=5, help="How many of your newest recordings to check (default 5)")
+    up.add_argument("--workers", type=int, default=2, help="Sessions to check at the same time (default 2)")
     up.add_argument("--no-plugins", action="store_true", help="Replay without loading your installed plugins")
     up.add_argument("--json", action="store_true")
 
@@ -243,10 +244,10 @@ def _cmd_upgrade(args: argparse.Namespace) -> int:
             return
         if ev.get("note"):
             print(f"· {ev['note']}", flush=True)
-        elif ev.get("stage") == "replay" and "row" not in ev:
-            print(f"· replaying {ev['done'] + 1}/{ev['total']}  {ev.get('cassette', '')}", flush=True)
+        elif ev.get("stage") == "replay" and ev.get("row"):
+            print(f"· {ev['done']}/{ev['total']} checked: {ev['row']['title'][:60]}", flush=True)
 
-    result = upgrade.run(args.to, tapes, args.limit, say, with_plugins=not args.no_plugins)
+    result = upgrade.run(args.to, tapes, args.limit, say, with_plugins=not args.no_plugins, workers=args.workers)
     print(json.dumps(result, indent=2, default=str) if args.json else "\n" + upgrade.render(result))
     return {"safe": 0, "changed": 1, "broken": 2}[result["verdict"]]
 
